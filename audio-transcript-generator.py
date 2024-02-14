@@ -1,5 +1,6 @@
 import openai
 import os
+import re
 
 # Ensure your OPENAI_API_KEY environment variable is set
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -26,54 +27,59 @@ def transcribe_audio_to_text(audio_file_path):
         # Handle any other exceptions
         return f"An exception occurred: {str(e)}"
 
-def insert_paragraph_breaks(text, sentences_per_paragraph=4):
-    """
-    Inserts paragraph breaks into text after a certain number of sentences.
-    """
-    sentences = text.split('. ')
-    paragraphs = []
-    paragraph = []
-    
-    for sentence in sentences:
-        paragraph.append(sentence)
-        if len(paragraph) >= sentences_per_paragraph:
-            paragraphs.append(' '.join(paragraph))
-            paragraph = []
-    
-    # Add any remaining sentences as a final paragraph
-    if paragraph:
-        paragraphs.append(' '.join(paragraph))
-    
-    return '\n\n'.join(paragraphs)
-    
+def insert_paragraph_breaks(text):
+    processed_text = ''
+    remaining_text = text
+    error_messages = ''
+
+    while remaining_text:
+        first200WordsArray = remaining_text.split(' ')[:200]
+        first200Words = ' '.join(first200WordsArray)
+
+        prompt = f"Given the following text, identify the number of sentences that should form the first paragraph. Provide a single number between 1 and 5 as your response, with no other commentary.\n\n{first200Words}"
+
+        from openai import OpenAI
+        client = OpenAI()
+
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            temperature=0,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        response_text = response.choices[0].message.content
+        matches = re.findall(r'\b[1-5]\b', response_text)
+        if not matches:
+            error_messages += f"Error: Received unexpected response format from the API: {response} For text: {first200Words}\n"
+            length = 2
+        else:
+            length = int(matches[0])
+
+        sentences = re.split(r'(?<=[.!?])\s+', remaining_text, maxsplit=length)
+        paragraph = ' '.join(sentences[:length])
+        processed_text += f"{paragraph}\n\n"
+
+        remaining_text = ' '.join(sentences[length:])
+
+    if error_messages:
+        processed_text += f"\n\n Error messages: {error_messages}"
+
+    return processed_text
+
 def main():
-    # Prompt the user for the path to the audio file
-    audio_file_path = input("Please enter the path to your audio file: ")
-    
-    # Strip quotation marks from the path for safety
-    audio_file_path = audio_file_path.strip('"').strip("'")
-    
-    # Check if the file exists before proceeding
-    if not os.path.isfile(audio_file_path):
-        print("Error: The file does not exist. Please check the path and try again.")
-        return
-    
-    transcribed_text = transcribe_audio_to_text(audio_file_path)
-
-    if "Error" not in transcribed_text:
-        processed_text = insert_paragraph_breaks(transcribed_text)
-        print(processed_text)
-    else:
-        print(transcribed_text)
-
-if __name__ == '__main__':
-    # Prompt the user for the path to the audio file
     audio_file_path = input("Please enter the path to your audio file: ").strip('"').strip("'")
 
-    # Verify that the file exists
     if not os.path.isfile(audio_file_path):
         print("Error: The file does not exist. Please check the path and try again.")
     else:
-        # Transcribe the audio file to text
         transcription = transcribe_audio_to_text(audio_file_path)
-        print(transcription)
+        if "An exception occurred" not in transcription:
+            processed_text = insert_paragraph_breaks(transcription)
+            print(processed_text)
+        else:
+            print(transcription)
+
+if __name__ == '__main__':
+    main()
