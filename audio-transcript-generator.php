@@ -8,8 +8,8 @@ Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
 
-// Ensure the getID3 library is loaded
-require_once 'getID3/getid3.php';
+// Include the getID3 library
+require_once plugin_dir_path(__FILE__) . 'getID3/getid3/getid3.php';
 
 // Function to send audio chunk to the API
 function send_audio_chunk($audioPath) {
@@ -57,7 +57,7 @@ function merge_transcriptions($transcriptions, $overlapDuration) {
     return $mergedTranscription;
 }
 
-// Example usage with already split audio files
+// Function to handle audio transcription
 function handle_audio_transcription($audioChunks) {
     $transcriptions = [];
 
@@ -70,12 +70,52 @@ function handle_audio_transcription($audioChunks) {
     return $mergedTranscription;
 }
 
-// Example hook to process audio transcription (adjust this according to your needs)
-function process_audio_transcription() {
-    $audioChunks = ['chunk1.mp3', 'chunk2.mp3', 'chunk3.mp3']; // Paths to audio chunks
-    $transcription = handle_audio_transcription($audioChunks);
-    echo $transcription;
+// Shortcode function to display the upload form and handle the transcription
+function chatgpt_audio_transcription_shortcode($atts) {
+    if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['audio_file'])) {
+        $uploads_dir = wp_upload_dir();
+        $uploaded_file_path = $uploads_dir['path'] . '/' . basename($_FILES['audio_file']['name']);
+
+        if (move_uploaded_file($_FILES['audio_file']['tmp_name'], $uploaded_file_path)) {
+            $audioChunks = [$uploaded_file_path]; // This example assumes a single chunk for simplicity
+            $transcription = handle_audio_transcription($audioChunks);
+            echo '<h2>Transcription:</h2>';
+            echo '<p>' . esc_html($transcription) . '</p>';
+        } else {
+            echo '<p>There was an error uploading the file.</p>';
+        }
+    } elseif ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['audio_url'])) {
+        $audio_url = esc_url_raw($_POST['audio_url']);
+        $audio_content = file_get_contents($audio_url);
+        $uploads_dir = wp_upload_dir();
+        $audio_file_path = $uploads_dir['path'] . '/temp_audio_file.mp3';
+
+        if (file_put_contents($audio_file_path, $audio_content)) {
+            $audioChunks = [$audio_file_path]; // This example assumes a single chunk for simplicity
+            $transcription = handle_audio_transcription($audioChunks);
+            echo '<h2>Transcription:</h2>';
+            echo '<p>' . esc_html($transcription) . '</p>';
+        } else {
+            echo '<p>There was an error downloading the audio file.</p>';
+        }
+    }
+
+    ob_start();
+    ?>
+    <form method="post" enctype="multipart/form-data">
+        <h2>Upload an Audio File</h2>
+        <input type="file" name="audio_file" accept="audio/*">
+        <input type="submit" value="Transcribe">
+    </form>
+    <h2>Or Enter an Audio File URL</h2>
+    <form method="post">
+        <input type="url" name="audio_url" placeholder="https://example.com/audiofile.mp3">
+        <input type="submit" value="Transcribe">
+    </form>
+    <?php
+    return ob_get_clean();
 }
+add_shortcode('chatgpt_audio_transcription', 'chatgpt_audio_transcription_shortcode');
 
 // Add an admin menu item for plugin settings
 function chatgpt_audio_transcription_menu() {
