@@ -63,7 +63,11 @@ function handle_audio_transcription($audioChunks) {
 
     foreach ($audioChunks as $chunk) {
         $response = send_audio_chunk($chunk);
-        $transcriptions[] = $response['transcription'];
+        if (isset($response['transcription'])) {
+            $transcriptions[] = $response['transcription'];
+        } else {
+            return 'Error in transcription: ' . json_encode($response);
+        }
     }
 
     $mergedTranscription = merge_transcriptions($transcriptions, 10); // Assuming 10 characters overlap
@@ -72,7 +76,9 @@ function handle_audio_transcription($audioChunks) {
 
 // Shortcode function to display the upload form and handle the transcription
 function chatgpt_audio_transcription_shortcode($atts) {
-    if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['audio_file'])) {
+    ob_start();
+
+    if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['audio_file']) && $_FILES['audio_file']['error'] == UPLOAD_ERR_OK) {
         $uploads_dir = wp_upload_dir();
         $uploaded_file_path = $uploads_dir['path'] . '/' . basename($_FILES['audio_file']['name']);
 
@@ -87,20 +93,24 @@ function chatgpt_audio_transcription_shortcode($atts) {
     } elseif ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['audio_url'])) {
         $audio_url = esc_url_raw($_POST['audio_url']);
         $audio_content = file_get_contents($audio_url);
-        $uploads_dir = wp_upload_dir();
-        $audio_file_path = $uploads_dir['path'] . '/temp_audio_file.mp3';
 
-        if (file_put_contents($audio_file_path, $audio_content)) {
-            $audioChunks = [$audio_file_path]; // This example assumes a single chunk for simplicity
-            $transcription = handle_audio_transcription($audioChunks);
-            echo '<h2>Transcription:</h2>';
-            echo '<p>' . esc_html($transcription) . '</p>';
-        } else {
+        if ($audio_content === FALSE) {
             echo '<p>There was an error downloading the audio file.</p>';
+        } else {
+            $uploads_dir = wp_upload_dir();
+            $audio_file_path = $uploads_dir['path'] . '/temp_audio_file.mp3';
+
+            if (file_put_contents($audio_file_path, $audio_content)) {
+                $audioChunks = [$audio_file_path]; // This example assumes a single chunk for simplicity
+                $transcription = handle_audio_transcription($audioChunks);
+                echo '<h2>Transcription:</h2>';
+                echo '<p>' . esc_html($transcription) . '</p>';
+            } else {
+                echo '<p>There was an error saving the downloaded audio file.</p>';
+            }
         }
     }
 
-    ob_start();
     ?>
     <form method="post" enctype="multipart/form-data">
         <h2>Upload an Audio File</h2>
