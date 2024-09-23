@@ -2,14 +2,34 @@
 /*
 Plugin Name: Whisper Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
-Description: A plugin to handle audio transcription using the Whisper API.
-Version: 1.0.1
+Description: A plugin to handle audio transcription using the Whisper API, now with audio compression using FFmpeg for large files.
+Version: 1.1.0
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
 
-// Include the getID3 library
-require_once plugin_dir_path(__FILE__) . 'getID3/getid3/getid3.php';
+// Function to compress audio using FFmpeg
+function compress_audio_file($inputPath, $outputPath) {
+    // Escape shell arguments to prevent command injection
+    $escapedInputPath = escapeshellarg($inputPath);
+    $escapedOutputPath = escapeshellarg($outputPath);
+
+    // FFmpeg command to compress the audio file
+    // Adjust the bitrate and sample rate as needed for compression
+    $command = "ffmpeg -i $escapedInputPath -ab 64k -ar 44100 -y $escapedOutputPath 2>&1";
+
+    // Execute the command and capture the output
+    exec($command, $output, $return_var);
+
+    // Check if the command was successful
+    if ($return_var !== 0) {
+        // Return error message
+        return ['success' => false, 'message' => implode("\n", $output)];
+    }
+
+    // Return success
+    return ['success' => true];
+}
 
 // Function to send audio file to the API
 function send_audio_file($audioPath) {
@@ -43,6 +63,24 @@ function send_audio_file($audioPath) {
 
 // Function to handle audio transcription
 function handle_audio_transcription($audioPath) {
+    // Check the file size
+    $fileSize = filesize($audioPath);
+
+    // If the file size is greater than 25 MB, compress it
+    if ($fileSize > 25 * 1024 * 1024) { // 25 MB in bytes
+        $uploads_dir = wp_upload_dir();
+        $compressed_audio_path = $uploads_dir['path'] . '/compressed_' . basename($audioPath);
+
+        $compressionResult = compress_audio_file($audioPath, $compressed_audio_path);
+
+        if (!$compressionResult['success']) {
+            return 'Error compressing audio file: ' . esc_html($compressionResult['message']);
+        }
+
+        // Use the compressed audio file for transcription
+        $audioPath = $compressed_audio_path;
+    }
+
     $response = send_audio_file($audioPath);
     if (isset($response['text'])) {
         return $response['text'];
@@ -140,6 +178,6 @@ function whisper_audio_transcription_section_text() {
 
 function whisper_audio_transcription_setting_input() {
     $api_key = get_option('openai_api_key');
-    echo "<input id='openai_api_key' name='openai_api_key' type='text' value='" . esc_attr($api_key) . "' />";
+    echo "<input id='openai_api_key' name='openai_api_key' type='password' value='" . esc_attr($api_key) . "' />";
 }
 ?>
