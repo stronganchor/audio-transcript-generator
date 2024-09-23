@@ -1,9 +1,9 @@
 <?php
 /*
-Plugin Name: ChatGPT Audio Transcription Interface
+Plugin Name: Whisper Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
-Description: A plugin to handle audio transcription using the ChatGPT API for arbitrarily large audio files.
-Version: 1.0
+Description: A plugin to handle audio transcription using the Whisper API.
+Version: 1.0.1
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -11,8 +11,8 @@ Author URI: https://stronganchortech.com
 // Include the getID3 library
 require_once plugin_dir_path(__FILE__) . 'getID3/getid3/getid3.php';
 
-// Function to send audio chunk to the API
-function send_audio_chunk($audioPath) {
+// Function to send audio file to the API
+function send_audio_file($audioPath) {
     $api_key = get_option('openai_api_key');
     $api_endpoint = 'https://api.openai.com/v1/audio/transcriptions';
 
@@ -41,41 +41,18 @@ function send_audio_chunk($audioPath) {
     return json_decode($response, true);
 }
 
-// Function to merge transcriptions
-function merge_transcriptions($transcriptions, $overlapDuration) {
-    $mergedTranscription = '';
-    $previousEnd = '';
-
-    foreach ($transcriptions as $index => $transcription) {
-        if ($index > 0) {
-            $previousEnd = substr($transcriptions[$index - 1], -$overlapDuration);
-            $transcription = str_replace($previousEnd, '', $transcription);
-        }
-        $mergedTranscription .= $transcription;
-    }
-
-    return $mergedTranscription;
-}
-
 // Function to handle audio transcription
-function handle_audio_transcription($audioChunks) {
-    $transcriptions = [];
-
-    foreach ($audioChunks as $chunk) {
-        $response = send_audio_chunk($chunk);
-        if (isset($response['transcription'])) {
-            $transcriptions[] = $response['transcription'];
-        } else {
-            return 'Error in transcription: ' . json_encode($response);
-        }
+function handle_audio_transcription($audioPath) {
+    $response = send_audio_file($audioPath);
+    if (isset($response['text'])) {
+        return $response['text'];
+    } else {
+        return 'Error in transcription: ' . json_encode($response);
     }
-
-    $mergedTranscription = merge_transcriptions($transcriptions, 10); // Assuming 10 characters overlap
-    return $mergedTranscription;
 }
 
 // Shortcode function to display the upload form and handle the transcription
-function chatgpt_audio_transcription_shortcode($atts) {
+function whisper_audio_transcription_shortcode($atts) {
     ob_start();
 
     if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['audio_file']) && $_FILES['audio_file']['error'] == UPLOAD_ERR_OK) {
@@ -83,8 +60,7 @@ function chatgpt_audio_transcription_shortcode($atts) {
         $uploaded_file_path = $uploads_dir['path'] . '/' . basename($_FILES['audio_file']['name']);
 
         if (move_uploaded_file($_FILES['audio_file']['tmp_name'], $uploaded_file_path)) {
-            $audioChunks = [$uploaded_file_path]; // This example assumes a single chunk for simplicity
-            $transcription = handle_audio_transcription($audioChunks);
+            $transcription = handle_audio_transcription($uploaded_file_path);
             echo '<h2>Transcription:</h2>';
             echo '<p>' . esc_html($transcription) . '</p>';
         } else {
@@ -101,8 +77,7 @@ function chatgpt_audio_transcription_shortcode($atts) {
             $audio_file_path = $uploads_dir['path'] . '/temp_audio_file.mp3';
 
             if (file_put_contents($audio_file_path, $audio_content)) {
-                $audioChunks = [$audio_file_path]; // This example assumes a single chunk for simplicity
-                $transcription = handle_audio_transcription($audioChunks);
+                $transcription = handle_audio_transcription($audio_file_path);
                 echo '<h2>Transcription:</h2>';
                 echo '<p>' . esc_html($transcription) . '</p>';
             } else {
@@ -125,23 +100,23 @@ function chatgpt_audio_transcription_shortcode($atts) {
     <?php
     return ob_get_clean();
 }
-add_shortcode('chatgpt_audio_transcription', 'chatgpt_audio_transcription_shortcode');
+add_shortcode('whisper_audio_transcription', 'whisper_audio_transcription_shortcode');
 
 // Add an admin menu item for plugin settings
-function chatgpt_audio_transcription_menu() {
-    add_options_page('ChatGPT Audio Transcription Settings', 'ChatGPT Audio Transcription', 'manage_options', 'chatgpt-audio-transcription', 'chatgpt_audio_transcription_settings_page');
+function whisper_audio_transcription_menu() {
+    add_options_page('Whisper Audio Transcription Settings', 'Whisper Audio Transcription', 'manage_options', 'whisper-audio-transcription', 'whisper_audio_transcription_settings_page');
 }
-add_action('admin_menu', 'chatgpt_audio_transcription_menu');
+add_action('admin_menu', 'whisper_audio_transcription_menu');
 
 // Render the settings page
-function chatgpt_audio_transcription_settings_page() {
+function whisper_audio_transcription_settings_page() {
     ?>
     <div class="wrap">
-        <h1>ChatGPT Audio Transcription Settings</h1>
+        <h1>Whisper Audio Transcription Settings</h1>
         <form method="post" action="options.php">
             <?php
-            settings_fields('chatgpt_audio_transcription_options_group');
-            do_settings_sections('chatgpt_audio_transcription');
+            settings_fields('whisper_audio_transcription_options_group');
+            do_settings_sections('whisper_audio_transcription');
             submit_button();
             ?>
         </form>
@@ -150,20 +125,20 @@ function chatgpt_audio_transcription_settings_page() {
 }
 
 // Register and define the settings
-function chatgpt_audio_transcription_settings_init() {
-    register_setting('chatgpt_audio_transcription_options_group', 'openai_api_key');
+function whisper_audio_transcription_settings_init() {
+    register_setting('whisper_audio_transcription_options_group', 'openai_api_key');
 
-    add_settings_section('chatgpt_audio_transcription_main_section', 'Main Settings', 'chatgpt_audio_transcription_section_text', 'chatgpt_audio_transcription');
+    add_settings_section('whisper_audio_transcription_main_section', 'Main Settings', 'whisper_audio_transcription_section_text', 'whisper_audio_transcription');
 
-    add_settings_field('openai_api_key', 'OpenAI API Key', 'chatgpt_audio_transcription_setting_input', 'chatgpt_audio_transcription', 'chatgpt_audio_transcription_main_section');
+    add_settings_field('openai_api_key', 'OpenAI API Key', 'whisper_audio_transcription_setting_input', 'whisper_audio_transcription', 'whisper_audio_transcription_main_section');
 }
-add_action('admin_init', 'chatgpt_audio_transcription_settings_init');
+add_action('admin_init', 'whisper_audio_transcription_settings_init');
 
-function chatgpt_audio_transcription_section_text() {
+function whisper_audio_transcription_section_text() {
     echo '<p>Enter your OpenAI API key here.</p>';
 }
 
-function chatgpt_audio_transcription_setting_input() {
+function whisper_audio_transcription_setting_input() {
     $api_key = get_option('openai_api_key');
     echo "<input id='openai_api_key' name='openai_api_key' type='text' value='" . esc_attr($api_key) . "' />";
 }
