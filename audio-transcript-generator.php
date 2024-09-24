@@ -3,7 +3,7 @@
 Plugin Name: Whisper Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the Whisper API, now with enhanced error handling and dynamic post titles.
-Version: 1.4.3
+Version: 1.4.4
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -39,73 +39,85 @@ class Whisper_Transcription_Process extends WP_Background_Process {
         // Set unlimited execution time and increase memory limit
         set_time_limit(0);
         ini_set('memory_limit', '512M'); // Adjust as necessary
-
+    
+        $audioPath = $item['audio_path'];
+        $transcription_post_id = $item['post_id'];
+        $error_response = '';
+    
         try {
-            // $item contains the path to the audio file
-            $audioPath = $item['audio_path'];
-            $user_id = $item['user_id'];
-            $transcription_post_id = $item['post_id'];
-
             // Handle the transcription
             $transcription = whisper_handle_audio_transcription($audioPath, $error_response);
-
-            // Update the post with the transcription
+    
             if ($transcription) {
                 // Send the transcription to OpenAI for post-processing
                 $processed_transcription = process_transcription_with_gpt($transcription);
-
+    
                 // Extract the first 10 words for the post title
                 $title = wp_trim_words($processed_transcription, 10, '...');
-
+    
                 $update_result = wp_update_post([
                     'ID' => $transcription_post_id,
                     'post_title' => $title,
                     'post_content' => wp_kses_post($processed_transcription),
                     'post_status' => 'publish',
                 ], true);
-
+    
                 if (is_wp_error($update_result)) {
                     error_log("[" . date('Y-m-d H:i:s') . "] Error updating post ID $transcription_post_id: " . $update_result->get_error_message());
                 } else {
                     error_log("[" . date('Y-m-d H:i:s') . "] Successfully updated post ID $transcription_post_id");
                 }
             } else {
-                // Update the post to include the raw error response
-                $error_message = 'There was an error processing your transcription. Raw response: ' . esc_html($error_response);
-
+                // Handle the error case and update the post with the error message
+                $error_message = 'There was an error processing your transcription. Error details: ' . esc_html($error_response);
+    
                 $update_result = wp_update_post([
                     'ID' => $transcription_post_id,
                     'post_content' => $error_message,
                     'post_status' => 'publish',
                 ], true);
-
+    
                 if (is_wp_error($update_result)) {
-                    error_log("[" . date('Y-m-d H:i:s') . "] Error updating post ID $transcription_post_id: " . $update_result->get_error_message());
+                    error_log("[" . date('Y-m-d H:i:s') . "] Error updating post ID $transcription_post_id with error: " . $update_result->get_error_message());
                 } else {
                     error_log("[" . date('Y-m-d H:i:s') . "] Successfully updated post ID $transcription_post_id with error message");
                 }
+    
+                // Return false to stop retries and remove the item from the queue
+                return false;
             }
-
+    
             // Delete the audio file after processing
             if (file_exists($audioPath)) {
                 unlink($audioPath);
                 error_log("[" . date('Y-m-d H:i:s') . "] Deleted audio file: $audioPath");
             }
-
+    
             // Return false to remove the item from the queue
             return false;
+    
         } catch (Exception $e) {
+            // Log the exception
             error_log("[" . date('Y-m-d H:i:s') . "] Exception in task(): " . $e->getMessage());
             error_log($e->getTraceAsString());
+    
+            // Update the post with the error message
+            $error_message = 'An unexpected error occurred during transcription: ' . $e->getMessage();
+            $update_result = wp_update_post([
+                'ID' => $transcription_post_id,
+                'post_content' => $error_message,
+                'post_status' => 'publish',
+            ], true);
+    
+            if (is_wp_error($update_result)) {
+                error_log("[" . date('Y-m-d H:i:s') . "] Error updating post ID $transcription_post_id with exception: " . $update_result->get_error_message());
+            } else {
+                error_log("[" . date('Y-m-d H:i:s') . "] Successfully updated post ID $transcription_post_id with exception message");
+            }
+    
             // Return false to ensure the item is removed from the queue
             return false;
         }
-    }
-
-    // Complete process
-    protected function complete() {
-        parent::complete();
-        // Perform any actions when the entire queue is complete
     }
 }
 
