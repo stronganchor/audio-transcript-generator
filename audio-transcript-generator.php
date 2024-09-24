@@ -263,7 +263,7 @@ function process_transcription_with_gpt($transcription_text) {
         ],
         [
             'role' => 'user',
-            'content' => "Please correct any transcription errors or typos in spelling or punctuation, organize the following text into paragraphs, and format any references to the Bible by putting them in quotes followed by the verse reference.\n\n" . $transcription_text,
+            'content' => "Please correct any glaring transcription errors or typos in spelling or punctuation (but leave it alone if it is a colloquialism or normal speech pattern), organize the following text into paragraphs, and format any references to the Bible by putting them in quotes followed by the verse reference.\n\n" . $transcription_text,
         ],
     ];
 
