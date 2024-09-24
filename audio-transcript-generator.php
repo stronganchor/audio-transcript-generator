@@ -2,11 +2,32 @@
 /*
 Plugin Name: Whisper Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
-Description: A plugin to handle audio transcription using the Whisper API, now with asynchronous processing to avoid timeouts.
-Version: 1.2.0
+Description: A plugin to handle audio transcription using the Whisper API, now with enhanced error handling and dynamic post titles.
+Version: 1.3.0
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
+
+// Exit if accessed directly.
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+// Include the plugin update checker
+require_once plugin_dir_path(__FILE__) . 'plugin-update-checker/plugin-update-checker.php';
+use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
+
+$myUpdateChecker = PucFactory::buildUpdateChecker(
+    'https://github.com/stronganchor/audio-transcript-generator', // GitHub repository URL
+    __FILE__,                                        // Full path to the main plugin file
+    'audio-transcript-generator'                                  // Plugin slug
+);
+
+// Set the branch to "main"
+$myUpdateChecker->setBranch('main');
+
+// Optional: If you're using a private repository, specify the access token like this:
+// $myUpdateChecker->setAuthentication('your-token-here');
 
 // Include the WP Background Processing library
 require_once plugin_dir_path(__FILE__) . 'includes/wp-background-processing.php';
@@ -24,20 +45,26 @@ class Whisper_Transcription_Process extends WP_Background_Process {
         $transcription_post_id = $item['post_id'];
 
         // Handle the transcription
-        $transcription = whisper_handle_audio_transcription($audioPath);
+        $transcription = whisper_handle_audio_transcription($audioPath, $error_response);
 
         // Update the post with the transcription
         if ($transcription) {
+            // Extract the first 10 words for the post title
+            $title = wp_trim_words($transcription, 10, '...');
+
             wp_update_post([
                 'ID' => $transcription_post_id,
+                'post_title' => $title,
                 'post_content' => wp_kses_post($transcription),
                 'post_status' => 'publish',
             ]);
         } else {
-            // Update the post to indicate failure
+            // Update the post to include the raw error response
+            $error_message = 'There was an error processing your transcription. Raw response: ' . esc_html($error_response);
+
             wp_update_post([
                 'ID' => $transcription_post_id,
-                'post_content' => 'There was an error processing your transcription.',
+                'post_content' => $error_message,
                 'post_status' => 'publish',
             ]);
         }
@@ -62,7 +89,7 @@ class Whisper_Transcription_Process extends WP_Background_Process {
 $whisper_transcription_process = new Whisper_Transcription_Process();
 
 // Function to handle audio transcription (used in background processing)
-function whisper_handle_audio_transcription($audioPath) {
+function whisper_handle_audio_transcription($audioPath, &$error_response = '') {
     error_log("[" . date('Y-m-d H:i:s') . "] Starting whisper_handle_audio_transcription");
 
     // Check the file size
@@ -80,6 +107,7 @@ function whisper_handle_audio_transcription($audioPath) {
 
         if (!$compressionResult['success']) {
             error_log("[" . date('Y-m-d H:i:s') . "] Error compressing audio file: " . $compressionResult['message']);
+            $error_response = 'Error compressing audio file: ' . $compressionResult['message'];
             return false;
         }
 
@@ -100,7 +128,8 @@ function whisper_handle_audio_transcription($audioPath) {
     if (isset($response['text'])) {
         return $response['text'];
     } else {
-        error_log("[" . date('Y-m-d H:i:s') . "] Error in transcription: " . json_encode($response));
+        $error_response = json_encode($response);
+        error_log("[" . date('Y-m-d H:i:s') . "] Error in transcription: " . $error_response);
         return false;
     }
 }
@@ -127,7 +156,7 @@ function compress_audio_file($inputPath, $outputPath) {
     return ['success' => true];
 }
 
-// Function to send audio file to the API (same as before)
+// Function to send audio file to the API (modified to return errors)
 function send_audio_file($audioPath) {
     error_log("[" . date('Y-m-d H:i:s') . "] Starting send_audio_file");
 
@@ -162,17 +191,26 @@ function send_audio_file($audioPath) {
     if (curl_errno($ch)) {
         $curl_error = curl_error($ch);
         error_log("[" . date('Y-m-d H:i:s') . "] cURL error: $curl_error");
-        return false;
+        return ['error' => $curl_error];
     }
+
+    $http_status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
     curl_close($ch);
 
-    error_log("[" . date('Y-m-d H:i:s') . "] cURL request completed");
+    error_log("[" . date('Y-m-d H:i:s') . "] cURL request completed with status $http_status");
 
-    return json_decode($response, true);
+    $decoded_response = json_decode($response, true);
+
+    if ($http_status != 200) {
+        // Return error response
+        return $decoded_response ? $decoded_response : ['error' => 'Unexpected error occurred'];
+    }
+
+    return $decoded_response;
 }
 
-// Shortcode function to display the upload form and handle the transcription
+// Shortcode function to display the upload form and handle the transcription (unchanged)
 function whisper_audio_transcription_shortcode($atts) {
     ob_start();
 
@@ -218,7 +256,7 @@ function whisper_audio_transcription_shortcode($atts) {
 }
 add_shortcode('whisper_audio_transcription', 'whisper_audio_transcription_shortcode');
 
-// Register custom post type for transcriptions
+// Register custom post type for transcriptions (unchanged)
 function whisper_register_transcription_post_type() {
     $args = [
         'public' => true,
@@ -230,13 +268,13 @@ function whisper_register_transcription_post_type() {
 }
 add_action('init', 'whisper_register_transcription_post_type');
 
-// Add an admin menu item for plugin settings (same as before)
+// Add an admin menu item for plugin settings (unchanged)
 function whisper_audio_transcription_menu() {
     add_options_page('Whisper Audio Transcription Settings', 'Whisper Audio Transcription', 'manage_options', 'whisper-audio-transcription', 'whisper_audio_transcription_settings_page');
 }
 add_action('admin_menu', 'whisper_audio_transcription_menu');
 
-// Render the settings page (same as before)
+// Render the settings page (unchanged)
 function whisper_audio_transcription_settings_page() {
     ?>
     <div class="wrap">
@@ -252,7 +290,7 @@ function whisper_audio_transcription_settings_page() {
     <?php
 }
 
-// Register and define the settings (same as before)
+// Register and define the settings (unchanged)
 function whisper_audio_transcription_settings_init() {
     register_setting('whisper_audio_transcription_options_group', 'openai_api_key');
 
