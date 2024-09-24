@@ -3,7 +3,7 @@
 Plugin Name: Whisper Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the Whisper API, now with enhanced error handling and dynamic post titles.
-Version: 1.4.1
+Version: 1.4.2
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -51,8 +51,8 @@ class Whisper_Transcription_Process extends WP_Background_Process {
 
             // Update the post with the transcription
             if ($transcription) {
-                // Send the transcription to GPT-4 for post-processing
-                $processed_transcription = process_transcription_with_gpt4($transcription);
+                // Send the transcription to OpenAI for post-processing
+                $processed_transcription = process_transcription_with_gpt($transcription);
 
                 // Extract the first 10 words for the post title
                 $title = wp_trim_words($processed_transcription, 10, '...');
@@ -237,9 +237,9 @@ function send_audio_file($audioPath) {
     return $decoded_response;
 }
 
-// Function to process transcription text with GPT-4
-function process_transcription_with_gpt4($transcription_text) {
-    error_log("[" . date('Y-m-d H:i:s') . "] Starting process_transcription_with_gpt4");
+// Function to process transcription text with OpenAI API
+function process_transcription_with_gpt($transcription_text) {
+    error_log("[" . date('Y-m-d H:i:s') . "] Starting process_transcription_with_gpt");
 
     $api_key = get_option('openai_api_key');
     $api_endpoint = 'https://api.openai.com/v1/chat/completions';
@@ -256,7 +256,7 @@ function process_transcription_with_gpt4($transcription_text) {
     ];
 
     $postData = [
-        'model' => 'gpt-4o-2024-08-06',
+        'model' => 'o1-mini',
         'messages' => $messages,
         'temperature' => 0.7,
     ];
@@ -277,13 +277,13 @@ function process_transcription_with_gpt4($transcription_text) {
 
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($postData));
 
-    error_log("[" . date('Y-m-d H:i:s') . "] Executing GPT-4 API request");
+    error_log("[" . date('Y-m-d H:i:s') . "] Executing OpenAI API post processing request");
 
     $response = curl_exec($ch);
 
     if (curl_errno($ch)) {
         $curl_error = curl_error($ch);
-        error_log("[" . date('Y-m-d H:i:s') . "] cURL error in GPT-4 request: $curl_error");
+        error_log("[" . date('Y-m-d H:i:s') . "] cURL error in OpenAI post processing request: $curl_error");
         // Return original transcription if error occurs
         return $transcription_text;
     }
@@ -296,17 +296,17 @@ function process_transcription_with_gpt4($transcription_text) {
 
     if ($http_status != 200) {
         // Log the error response
-        error_log("[" . date('Y-m-d H:i:s') . "] GPT-4 API error: " . json_encode($decoded_response));
+        error_log("[" . date('Y-m-d H:i:s') . "] OpenAI API error: " . json_encode($decoded_response));
         // Return original transcription if error occurs
         return $transcription_text;
     }
 
     if (isset($decoded_response['choices'][0]['message']['content'])) {
         $processed_text = $decoded_response['choices'][0]['message']['content'];
-        error_log("[" . date('Y-m-d H:i:s') . "] GPT-4 processing completed");
+        error_log("[" . date('Y-m-d H:i:s') . "] OpenAI processing completed");
         return $processed_text;
     } else {
-        error_log("[" . date('Y-m-d H:i:s') . "] Unexpected GPT-4 API response: " . json_encode($decoded_response));
+        error_log("[" . date('Y-m-d H:i:s') . "] Unexpected OpenAI API response: " . json_encode($decoded_response));
         // Return original transcription if unexpected response
         return $transcription_text;
     }
