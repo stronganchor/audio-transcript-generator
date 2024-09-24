@@ -3,7 +3,7 @@
 Plugin Name: Whisper Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the Whisper API, now with enhanced error handling and dynamic post titles.
-Version: 1.4.2
+Version: 1.4.3
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -256,7 +256,7 @@ function process_transcription_with_gpt($transcription_text) {
     ];
 
     $postData = [
-        'model' => 'o1-mini',
+        'model' => 'gpt-4o-mini',
         'messages' => $messages,
         'temperature' => 0.7,
     ];
