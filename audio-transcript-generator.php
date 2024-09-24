@@ -3,7 +3,7 @@
 Plugin Name: Whisper Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the Whisper API, now with enhanced error handling and dynamic post titles.
-Version: 1.3.0
+Version: 1.4.0
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -26,9 +26,6 @@ $myUpdateChecker = PucFactory::buildUpdateChecker(
 // Set the branch to "main"
 $myUpdateChecker->setBranch('main');
 
-// Optional: If you're using a private repository, specify the access token like this:
-// $myUpdateChecker->setAuthentication('your-token-here');
-
 // Include the WP Background Processing library
 require_once plugin_dir_path(__FILE__) . 'includes/wp-background-processing.php';
 
@@ -39,43 +36,70 @@ class Whisper_Transcription_Process extends WP_Background_Process {
 
     // Task to process each item in the queue
     protected function task($item) {
-        // $item contains the path to the audio file
-        $audioPath = $item['audio_path'];
-        $user_id = $item['user_id'];
-        $transcription_post_id = $item['post_id'];
+        // Set unlimited execution time and increase memory limit
+        set_time_limit(0);
+        ini_set('memory_limit', '512M'); // Adjust as necessary
 
-        // Handle the transcription
-        $transcription = whisper_handle_audio_transcription($audioPath, $error_response);
+        try {
+            // $item contains the path to the audio file
+            $audioPath = $item['audio_path'];
+            $user_id = $item['user_id'];
+            $transcription_post_id = $item['post_id'];
 
-        // Update the post with the transcription
-        if ($transcription) {
-            // Extract the first 10 words for the post title
-            $title = wp_trim_words($transcription, 10, '...');
+            // Handle the transcription
+            $transcription = whisper_handle_audio_transcription($audioPath, $error_response);
 
-            wp_update_post([
-                'ID' => $transcription_post_id,
-                'post_title' => $title,
-                'post_content' => wp_kses_post($transcription),
-                'post_status' => 'publish',
-            ]);
-        } else {
-            // Update the post to include the raw error response
-            $error_message = 'There was an error processing your transcription. Raw response: ' . esc_html($error_response);
+            // Update the post with the transcription
+            if ($transcription) {
+                // Send the transcription to GPT-4 for post-processing
+                $processed_transcription = process_transcription_with_gpt4($transcription);
 
-            wp_update_post([
-                'ID' => $transcription_post_id,
-                'post_content' => $error_message,
-                'post_status' => 'publish',
-            ]);
+                // Extract the first 10 words for the post title
+                $title = wp_trim_words($processed_transcription, 10, '...');
+
+                $update_result = wp_update_post([
+                    'ID' => $transcription_post_id,
+                    'post_title' => $title,
+                    'post_content' => wp_kses_post($processed_transcription),
+                    'post_status' => 'publish',
+                ], true);
+
+                if (is_wp_error($update_result)) {
+                    error_log("[" . date('Y-m-d H:i:s') . "] Error updating post ID $transcription_post_id: " . $update_result->get_error_message());
+                } else {
+                    error_log("[" . date('Y-m-d H:i:s') . "] Successfully updated post ID $transcription_post_id");
+                }
+            } else {
+                // Update the post to include the raw error response
+                $error_message = 'There was an error processing your transcription. Raw response: ' . esc_html($error_response);
+
+                $update_result = wp_update_post([
+                    'ID' => $transcription_post_id,
+                    'post_content' => $error_message,
+                    'post_status' => 'publish',
+                ], true);
+
+                if (is_wp_error($update_result)) {
+                    error_log("[" . date('Y-m-d H:i:s') . "] Error updating post ID $transcription_post_id: " . $update_result->get_error_message());
+                } else {
+                    error_log("[" . date('Y-m-d H:i:s') . "] Successfully updated post ID $transcription_post_id with error message");
+                }
+            }
+
+            // Delete the audio file after processing
+            if (file_exists($audioPath)) {
+                unlink($audioPath);
+                error_log("[" . date('Y-m-d H:i:s') . "] Deleted audio file: $audioPath");
+            }
+
+            // Return false to remove the item from the queue
+            return false;
+        } catch (Exception $e) {
+            error_log("[" . date('Y-m-d H:i:s') . "] Exception in task(): " . $e->getMessage());
+            error_log($e->getTraceAsString());
+            // Return false to ensure the item is removed from the queue
+            return false;
         }
-
-        // Delete the audio file after processing
-        if (file_exists($audioPath)) {
-            unlink($audioPath);
-        }
-
-        // Return false to remove the item from the queue
-        return false;
     }
 
     // Complete process
@@ -126,6 +150,7 @@ function whisper_handle_audio_transcription($audioPath, &$error_response = '') {
     error_log("[" . date('Y-m-d H:i:s') . "] Received response from OpenAI");
 
     if (isset($response['text'])) {
+        error_log("[" . date('Y-m-d H:i:s') . "] Transcription received");
         return $response['text'];
     } else {
         $error_response = json_encode($response);
@@ -156,7 +181,7 @@ function compress_audio_file($inputPath, $outputPath) {
     return ['success' => true];
 }
 
-// Function to send audio file to the API (modified to return errors)
+// Function to send audio file to the Whisper API
 function send_audio_file($audioPath) {
     error_log("[" . date('Y-m-d H:i:s') . "] Starting send_audio_file");
 
@@ -165,8 +190,8 @@ function send_audio_file($audioPath) {
 
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $api_endpoint);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
 
     // Set longer timeouts for cURL
     curl_setopt($ch, CURLOPT_TIMEOUT, 600); // Total execution time
@@ -203,11 +228,88 @@ function send_audio_file($audioPath) {
     $decoded_response = json_decode($response, true);
 
     if ($http_status != 200) {
+        // Log the error response
+        error_log("[" . date('Y-m-d H:i:s') . "] OpenAI API error: " . json_encode($decoded_response));
         // Return error response
         return $decoded_response ? $decoded_response : ['error' => 'Unexpected error occurred'];
     }
 
     return $decoded_response;
+}
+
+// Function to process transcription text with GPT-4
+function process_transcription_with_gpt4($transcription_text) {
+    error_log("[" . date('Y-m-d H:i:s') . "] Starting process_transcription_with_gpt4");
+
+    $api_key = get_option('openai_api_key');
+    $api_endpoint = 'https://api.openai.com/v1/chat/completions';
+
+    $messages = [
+        [
+            'role' => 'system',
+            'content' => 'You are an expert text editor specializing in correcting transcription errors.'
+        ],
+        [
+            'role' => 'user',
+            'content' => "Please correct any transcription errors or typos in spelling or punctuation, organize the following text into paragraphs, and format any references to the Bible by putting them in quotes followed by the verse reference.\n\n" . $transcription_text,
+        ],
+    ];
+
+    $postData = [
+        'model' => 'gpt-4o',
+        'messages' => $messages,
+        'temperature' => 0.7,
+    ];
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $api_endpoint);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+
+    // Set longer timeouts for cURL
+    curl_setopt($ch, CURLOPT_TIMEOUT, 600); // Total execution time
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 60); // Connection timeout
+
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Authorization: Bearer ' . $api_key,
+        'Content-Type: application/json',
+    ]);
+
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($postData));
+
+    error_log("[" . date('Y-m-d H:i:s') . "] Executing GPT-4 API request");
+
+    $response = curl_exec($ch);
+
+    if (curl_errno($ch)) {
+        $curl_error = curl_error($ch);
+        error_log("[" . date('Y-m-d H:i:s') . "] cURL error in GPT-4 request: $curl_error");
+        // Return original transcription if error occurs
+        return $transcription_text;
+    }
+
+    $http_status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+    curl_close($ch);
+
+    $decoded_response = json_decode($response, true);
+
+    if ($http_status != 200) {
+        // Log the error response
+        error_log("[" . date('Y-m-d H:i:s') . "] GPT-4 API error: " . json_encode($decoded_response));
+        // Return original transcription if error occurs
+        return $transcription_text;
+    }
+
+    if (isset($decoded_response['choices'][0]['message']['content'])) {
+        $processed_text = $decoded_response['choices'][0]['message']['content'];
+        error_log("[" . date('Y-m-d H:i:s') . "] GPT-4 processing completed");
+        return $processed_text;
+    } else {
+        error_log("[" . date('Y-m-d H:i:s') . "] Unexpected GPT-4 API response: " . json_encode($decoded_response));
+        // Return original transcription if unexpected response
+        return $transcription_text;
+    }
 }
 
 // Shortcode function to display the upload form and handle the transcription (unchanged)
