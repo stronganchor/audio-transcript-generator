@@ -1,10 +1,15 @@
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function() { 
     const transcriptionButton = document.querySelector('#transcribeButton');
     
     if (transcriptionButton) {
         transcriptionButton.addEventListener('click', async function() {
-            const audioUrl = 'https://storage.googleapis.com/aai-web-samples/5_common_sports_injuries.mp3'; // Hardcoded URL
+            const audioUrl = document.querySelector('#audio_url').value;
             const apiKey = assemblyai_settings.assemblyai_api_key;
+
+            if (!audioUrl) {
+                alert('Please enter a valid URL.');
+                return;
+            }
 
             try {
                 const params = {
