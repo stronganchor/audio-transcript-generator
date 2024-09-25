@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field, with GPT-4o-mini post-processing.
-Version: 1.8.1
+Version: 1.8.2
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -102,21 +102,30 @@ add_action('load-edit.php', 'whisper_transcription_admin_shortcode_after_title')
 add_action('wp_ajax_save_transcription', 'save_transcription_callback');
 add_action('wp_ajax_nopriv_save_transcription', 'save_transcription_callback');
 
-// Handle transcription saving via AJAX and append to the current post content
 function save_transcription_callback() {
     try {
         if (isset($_POST['transcription']) && isset($_POST['audio_url']) && isset($_POST['post_id'])) {
             $transcription_text = sanitize_text_field($_POST['transcription']);
             $audio_url = sanitize_text_field($_POST['audio_url']);
-            $post_id = intval($_POST['post_id']);
+            $post_id = intval($_POST['post_id']); // Get the post ID
 
             // Extract the file name from the audio URL
-            $audio_file_name = basename(parse_url($audio_url, PHP_URL_PATH));
+            $audio_file_name = basename(parse_url($audio_url, PHP_URL_PATH)); // This will give you "example.mp3"
 
             // Send transcription text to OpenAI for post-processing
             $processed_transcription = process_transcription_with_gpt($transcription_text);
 
-            // Insert the processed transcription as a new transcription post
+            // Append the transcription to the current post's content
+            $current_post = get_post($post_id);
+            if ($current_post) {
+                $updated_content = $current_post->post_content . "\n\n<!-- Transcription -->\n\n" . $processed_transcription;
+                wp_update_post([
+                    'ID' => $post_id,
+                    'post_content' => $updated_content
+                ]);
+            }
+
+            // Insert the processed transcription as a new post with the audio file name as the title
             $new_post_id = wp_insert_post([
                 'post_title' => $audio_file_name,  // Set the title as the audio file name
                 'post_content' => $processed_transcription,
@@ -124,21 +133,13 @@ function save_transcription_callback() {
                 'post_type' => 'transcription',
             ]);
 
-            // Append transcription to the current post's content
-            $current_post_content = get_post_field('post_content', $post_id);
-            $updated_content = $current_post_content . "\n\n<!-- Transcription Start -->\n" . $processed_transcription . "\n<!-- Transcription End -->";
-            wp_update_post([
-                'ID' => $post_id,
-                'post_content' => $updated_content
-            ]);
-
             if ($new_post_id) {
-                wp_send_json_success(['post_id' => $new_post_id]);
+                wp_send_json_success(['new_post_id' => $new_post_id]);
             } else {
                 wp_send_json_error(['message' => 'Failed to create transcription post']);
             }
         } else {
-            wp_send_json_error(['message' => 'No transcription text or audio URL or post ID provided']);
+            wp_send_json_error(['message' => 'Missing transcription text, audio URL, or post ID']);
         }
     } catch (Exception $e) {
         error_log("Error in save_transcription_callback: " . $e->getMessage());
