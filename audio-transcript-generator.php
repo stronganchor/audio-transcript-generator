@@ -2,8 +2,8 @@
 /*
 Plugin Name: AssemblyAI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
-Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field.
-Version: 1.6.8
+Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field, with GPT-4o-mini post-processing.
+Version: 1.6.9
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -26,9 +26,6 @@ $myUpdateChecker = PucFactory::buildUpdateChecker(
 // Set the branch to "main"
 $myUpdateChecker->setBranch('main');
 
-// Include the WP Background Processing library
-require_once plugin_dir_path(__FILE__) . 'includes/wp-background-processing.php';
-
 // Handle transcription saving via AJAX
 add_action('wp_ajax_save_transcription', 'save_transcription_callback');
 add_action('wp_ajax_nopriv_save_transcription', 'save_transcription_callback');
@@ -37,10 +34,13 @@ function save_transcription_callback() {
     if (isset($_POST['transcription'])) {
         $transcription_text = sanitize_text_field($_POST['transcription']);
 
-        // Insert the transcription as a new post
+        // Send transcription text to OpenAI for post-processing
+        $processed_transcription = process_transcription_with_gpt($transcription_text);
+
+        // Insert the processed transcription as a new post
         $post_id = wp_insert_post([
             'post_title' => 'Transcription',
-            'post_content' => $transcription_text,
+            'post_content' => $processed_transcription,
             'post_status' => 'publish',
             'post_type' => 'transcription',
         ]);
@@ -68,6 +68,80 @@ function enqueue_transcription_script() {
 }
 add_action('wp_enqueue_scripts', 'enqueue_transcription_script');
 
+// Function to process transcription text with GPT-4o-mini (using OpenAI API)
+function process_transcription_with_gpt($transcription_text) {
+    error_log("[" . date('Y-m-d H:i:s') . "] Starting process_transcription_with_gpt");
+
+    $api_key = get_option('openai_api_key');
+    $api_endpoint = 'https://api.openai.com/v1/chat/completions';
+
+    $messages = [
+        [
+            'role' => 'system',
+            'content' => 'You are an expert text editor specializing in correcting transcription errors.'
+        ],
+        [
+            'role' => 'user',
+            'content' => "Perform basic editing tasks on this speech transcript. Don't change wording, just update the punctuation and spelling and add paragraph breaks where necessary.\n\n" . $transcription_text,
+        ],
+    ];
+
+    $postData = [
+        'model' => 'gpt-4o-mini',
+        'messages' => $messages,
+        'temperature' => 0.7,
+    ];
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $api_endpoint);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+
+    // Set longer timeouts for cURL
+    curl_setopt($ch, CURLOPT_TIMEOUT, 600); // Total execution time
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 60); // Connection timeout
+
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Authorization: Bearer ' . $api_key,
+        'Content-Type: application/json',
+    ]);
+
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($postData));
+
+    error_log("[" . date('Y-m-d H:i:s') . "] Executing OpenAI API post-processing request");
+
+    $response = curl_exec($ch);
+
+    if (curl_errno($ch)) {
+        $curl_error = curl_error($ch);
+        error_log("[" . date('Y-m-d H:i:s') . "] cURL error in OpenAI post-processing request: $curl_error");
+        // Return original transcription if error occurs
+        return $transcription_text;
+    }
+
+    $http_status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    $decoded_response = json_decode($response, true);
+
+    if ($http_status != 200) {
+        // Log the error response
+        error_log("[" . date('Y-m-d H:i:s') . "] OpenAI API error: " . json_encode($decoded_response));
+        // Return original transcription if error occurs
+        return $transcription_text;
+    }
+
+    if (isset($decoded_response['choices'][0]['message']['content'])) {
+        $processed_text = $decoded_response['choices'][0]['message']['content'];
+        error_log("[" . date('Y-m-d H:i:s') . "] OpenAI processing completed");
+        return $processed_text;
+    } else {
+        error_log("[" . date('Y-m-d H:i:s') . "] Unexpected OpenAI API response: " . json_encode($decoded_response));
+        // Return original transcription if unexpected response
+        return $transcription_text;
+    }
+}
+
 // Shortcode function to display URL input for transcription
 function whisper_audio_transcription_shortcode($atts) {
     ob_start();
@@ -86,7 +160,7 @@ function whisper_audio_transcription_shortcode($atts) {
 }
 add_shortcode('whisper_audio_transcription', 'whisper_audio_transcription_shortcode');
 
-// Register custom post type for transcriptions (unchanged)
+// Register custom post type for transcriptions
 function whisper_register_transcription_post_type() {
     $args = [
         'public' => true,
@@ -145,4 +219,3 @@ function whisper_audio_transcription_setting_input_assemblyai() {
     $api_key = get_option('assemblyai_api_key');
     echo "<input id='assemblyai_api_key' name='assemblyai_api_key' type='password' value='" . esc_attr($api_key) . "' />";
 }
-?>
