@@ -3,7 +3,7 @@
 Plugin Name: AssemblyAI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API, now with enhanced error handling and dynamic post titles.
-Version: 1.6.3
+Version: 1.6.4
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -603,7 +603,7 @@ function whisper_add_transcription_meta_box() {
         'whisper_transcription_meta_box',
         'Audio Transcription',
         'whisper_render_transcription_meta_box',
-        ['post', 'your_custom_post_type'], // Add 'post' and any custom post types where you want this meta box
+        ['post', 'sermon', 'sermons', 'wpfc_sermon'], // Add 'post' and any custom post types where you want this meta box
         'side',
         'high'
     );
