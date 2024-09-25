@@ -633,4 +633,33 @@ function whisper_enqueue_admin_scripts($hook_suffix) {
 }
 add_action('admin_enqueue_scripts', 'whisper_enqueue_admin_scripts');
 
+add_action('wp_ajax_append_transcription_to_post', 'append_transcription_to_post');
+
+function append_transcription_to_post() {
+    if (isset($_POST['transcription']) && isset($_POST['post_id'])) {
+        $transcription_text = sanitize_text_field($_POST['transcription']);
+        $post_id = intval($_POST['post_id']);
+
+        // Get the current post content
+        $post_content = get_post_field('post_content', $post_id);
+
+        // Append the transcription to the existing content
+        $new_content = $post_content . "\n\n" . '<h2>Transcription:</h2>' . "\n" . $transcription_text;
+
+        // Update the post with the new content
+        $update_result = wp_update_post([
+            'ID' => $post_id,
+            'post_content' => $new_content,
+        ]);
+
+        if ($update_result) {
+            wp_send_json_success(['post_id' => $post_id]);
+        } else {
+            wp_send_json_error(['message' => 'Failed to append transcription to post.']);
+        }
+    } else {
+        wp_send_json_error(['message' => 'Invalid transcription data or post ID.']);
+    }
+}
+
 ?>
