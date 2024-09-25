@@ -1,16 +1,15 @@
 document.addEventListener('DOMContentLoaded', function() { 
     const transcriptionButton = document.querySelector('#transcribeButton');
-    const statusDiv = document.createElement('div');
+    const statusDiv = document.querySelector('#transcriptionStatus'); // Reference to the hidden status div
     const transcriptionContainer = document.createElement('div');
     
-    // Add a status div to the page to show progress
-    document.body.appendChild(statusDiv);
+    // Add the transcription container below the form
     document.body.appendChild(transcriptionContainer);
 
     if (transcriptionButton) {
         transcriptionButton.addEventListener('click', async function() {
             // Reset the status div
-            statusDiv.innerHTML = 'Starting transcription...';
+            statusDiv.style.display = 'none';  // Hide the status div at the start
             transcriptionContainer.innerHTML = ''; // Clear previous transcription
 
             const audioUrl = document.querySelector('#audio_url').value; // URL from user input
@@ -26,8 +25,8 @@ document.addEventListener('DOMContentLoaded', function() {
             transcriptionButton.disabled = true;
             document.querySelector('#audio_url').disabled = true;
 
-            // Inform the user the transcription is in progress and they can navigate away
-            statusDiv.innerHTML = 'The audio file has been submitted for transcription. This may take a few minutes. You can navigate away and come back to this page to check for updates, or wait here.';
+            // Show the status message
+            statusDiv.style.display = 'block';
 
             try {
                 const params = {
@@ -48,9 +47,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const data = await response.json();
 
                 if (data.error) {
-                    statusDiv.innerHTML = `Transcription request failed: ${data.error}`;
                     transcriptionButton.disabled = false;  // Enable the button again
                     document.querySelector('#audio_url').disabled = false;  // Enable input
+                    statusDiv.innerHTML = `Transcription request failed: ${data.error}`;
                     return;
                 }
 
@@ -62,9 +61,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
             } catch (error) {
                 console.error('Error during transcription request:', error);
-                statusDiv.innerHTML = 'An error occurred during transcription.';
                 transcriptionButton.disabled = false;  // Enable the button again
                 document.querySelector('#audio_url').disabled = false;  // Enable input
+                statusDiv.innerHTML = 'An error occurred during transcription.';
             }
         });
     }
