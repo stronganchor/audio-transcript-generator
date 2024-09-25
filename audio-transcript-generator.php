@@ -3,7 +3,7 @@
 Plugin Name: AssemblyAI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API, now with enhanced error handling and dynamic post titles.
-Version: 1.6.4
+Version: 1.6.5
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -78,10 +78,21 @@ function enqueue_transcription_script() {
     $relative_path = 'js/assemblyai-transcription.js';
     $asset_version = filemtime(plugin_dir_path(__FILE__) . $relative_path);
     wp_enqueue_script('assemblyai-transcription', plugin_dir_url(__FILE__) . $relative_path, [], $asset_version, true);
-    wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
-        'ajax_url' => admin_url('admin-ajax.php'),
-        'assemblyai_api_key' => get_option('assemblyai_api_key'),
-    ]);
+    // Localize script to pass data to JavaScript
+    if (is_admin() && ($hook_suffix === 'post.php' || $hook_suffix === 'post-new.php')) {
+        // Admin screen (post editor)
+        wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'assemblyai_api_key' => get_option('assemblyai_api_key'),
+            'post_id' => get_the_ID(),
+        ]);
+    } else {
+        // Frontend screen
+        wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'assemblyai_api_key' => get_option('assemblyai_api_key'),
+        ]);
+    }
 }
 add_action('wp_enqueue_scripts', 'enqueue_transcription_script');
 
