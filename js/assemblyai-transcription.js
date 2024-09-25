@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Poll for status until transcription is complete
                 const transcriptId = data.id;
-                pollTranscriptionStatus(apiKey, transcriptId);
+                pollTranscriptionStatus(apiKey, transcriptId, audioURL);
 
             } catch (error) {
                 console.error('Error during transcription request:', error);
@@ -58,9 +58,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Polling function for transcription status
-    async function pollTranscriptionStatus(apiKey, transcriptId) {
+    async function pollTranscriptionStatus(apiKey, transcriptId, audioUrl) {
         let transcriptionCompleted = false;
-
+    
         while (!transcriptionCompleted) {
             const pollResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
                 method: 'GET',
@@ -71,16 +71,16 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             
             const pollData = await pollResponse.json();
-
+    
             if (pollData.status === 'completed') {
                 transcriptionCompleted = true;
                 statusDiv.innerHTML = 'Transcription completed!';
                 console.log('Transcription completed:', pollData.text);
                 // Display the transcription on the page
                 transcriptionContainer.innerHTML = `<h2>Transcription Result:</h2><p>${pollData.text}</p>`;
-                // Optionally, save the transcription to WordPress
-                saveTranscriptionToWordPress(pollData.text);
-
+                // Save the transcription to WordPress along with the audio URL
+                saveTranscriptionToWordPress(pollData.text, audioUrl);
+    
             } else if (pollData.status === 'failed') {
                 console.error(`Transcription failed: ${pollData.error}`);
                 statusDiv.innerHTML = `Transcription failed: ${pollData.error}`;
@@ -94,7 +94,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Function to save transcription to WordPress
-    async function saveTranscriptionToWordPress(transcriptionText) {
+    async function saveTranscriptionToWordPress(transcriptionText, audioUrl) {
         const response = await fetch(assemblyai_settings.ajax_url, {
             method: 'POST',
             headers: {
@@ -102,10 +102,11 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             body: new URLSearchParams({
                 action: 'save_transcription',
-                transcription: transcriptionText
+                transcription: transcriptionText,
+                audio_url: audioUrl // Include the audio URL in the request
             }),
         });
-
+    
         const result = await response.json();
         if (result.success) {
             console.log('Transcription saved to WordPress post:', result);
