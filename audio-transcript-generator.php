@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field, with GPT-4o-mini post-processing.
-Version: 1.7.3
+Version: 1.7.5
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -26,21 +26,27 @@ $myUpdateChecker = PucFactory::buildUpdateChecker(
 // Set the branch to "main"
 $myUpdateChecker->setBranch('main');
 
-// Function to render the transcription shortcode form in the admin page
-function whisper_transcription_admin_shortcode() {
+// Function to render the transcription shortcode form below the title
+function whisper_transcription_admin_shortcode_after_title($content) {
     $screen = get_current_screen();
     
     // Only display on the transcription post list page
     if ($screen && $screen->post_type === 'transcription' && $screen->base === 'edit') {
-        echo '<div class="wrap">';
-        echo '<h2>Submit Audio for Transcription</h2>';
-        echo do_shortcode('[whisper_audio_transcription]');
-        echo '</div>';
+        // Build the form HTML
+        $shortcode_output = '<div class="wrap">';
+        $shortcode_output .= '<h2>Submit Audio for Transcription</h2>';
+        $shortcode_output .= do_shortcode('[whisper_audio_transcription]');
+        $shortcode_output .= '</div>';
+
+        // Add the form after the main title
+        add_action('in_admin_header', function () use ($shortcode_output) {
+            echo $shortcode_output;
+        });
     }
 }
 
-// Hook into 'load-edit.php' to add the shortcode form at the top of the transcription post list page
-add_action('load-edit.php', 'whisper_transcription_admin_shortcode');
+// Hook into 'load-edit.php' to place the shortcode after the title on the transcription list page
+add_action('load-edit.php', 'whisper_transcription_admin_shortcode_after_title');
 
 // Handle transcription saving via AJAX
 add_action('wp_ajax_save_transcription', 'save_transcription_callback');
