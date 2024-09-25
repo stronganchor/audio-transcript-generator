@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field, with GPT-4o-mini post-processing.
-Version: 1.8.4
+Version: 1.8.5
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -171,6 +171,7 @@ function enqueue_transcription_script() {
     wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
         'ajax_url' => admin_url('admin-ajax.php'),
         'assemblyai_api_key' => get_option('assemblyai_api_key'),
+        'post_id' => get_the_ID(),
     ]);
 }
 add_action('wp_enqueue_scripts', 'enqueue_transcription_script');
