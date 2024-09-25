@@ -3,7 +3,7 @@
 Plugin Name: AssemblyAI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API, now with enhanced error handling and dynamic post titles.
-Version: 1.5.6
+Version: 1.5.7
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -243,7 +243,7 @@ function assemblyai_upload_file($api_key, $path) {
 
     // Set longer timeouts for cURL
     curl_setopt($ch, CURLOPT_TIMEOUT, 600); // Total execution time
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 60); // Connection timeout
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 300); // Connection timeout
 
     $response = curl_exec($ch);
 
