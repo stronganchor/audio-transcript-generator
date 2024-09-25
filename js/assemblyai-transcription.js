@@ -3,7 +3,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (transcriptionButton) {
         transcriptionButton.addEventListener('click', async function() {
-            const audioUrl = 'https://storage.googleapis.com/aai-web-samples/5_common_sports_injuries.mp3'; // Replace with your actual audio file URL
+            const audioUrl = 'https://storage.googleapis.com/aai-web-samples/5_common_sports_injuries.mp3'; // Hardcoded URL
             const apiKey = assemblyai_settings.assemblyai_api_key;
 
             try {
@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     speaker_labels: true,
                 };
 
+                // Send request to start transcription
                 const response = await fetch('https://api.assemblyai.com/v2/transcript', {
                     method: 'POST',
                     headers: {
@@ -23,23 +24,50 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 const data = await response.json();
 
-                if (data.status === 'error') {
-                    console.error(`Transcription failed: ${data.error} Raw response: ${data}`);
+                if (data.error) {
+                    console.error(`Transcription request failed: ${data.error}`);
                     return;
                 }
 
-                console.log('Transcription completed:', data);
-                data.utterances.forEach(utterance => {
-                    console.log(`Speaker ${utterance.speaker}: ${utterance.text}`);
-                });
+                console.log('Transcription initiated, polling for completion:', data);
 
-                // Send the transcription data back to WordPress to save as a post
-                saveTranscriptionToWordPress(data.text);
+                // Poll for status until transcription is complete
+                const transcriptId = data.id;
+                pollTranscriptionStatus(apiKey, transcriptId);
 
             } catch (error) {
-                console.error('Error during transcription:', error);
+                console.error('Error during transcription request:', error);
             }
         });
+    }
+
+    async function pollTranscriptionStatus(apiKey, transcriptId) {
+        let transcriptionCompleted = false;
+
+        while (!transcriptionCompleted) {
+            const pollResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
+                method: 'GET',
+                headers: {
+                    'authorization': apiKey,
+                    'content-type': 'application/json',
+                },
+            });
+            
+            const pollData = await pollResponse.json();
+
+            if (pollData.status === 'completed') {
+                transcriptionCompleted = true;
+                console.log('Transcription completed:', pollData.text);
+                // Optionally, save the transcription to WordPress
+                saveTranscriptionToWordPress(pollData.text);
+            } else if (pollData.status === 'failed') {
+                console.error(`Transcription failed: ${pollData.error}`);
+                transcriptionCompleted = true;
+            } else {
+                console.log(`Transcription status: ${pollData.status}. Polling again in 5 seconds...`);
+                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before polling again
+            }
+        }
     }
 
     async function saveTranscriptionToWordPress(transcriptionText) {
