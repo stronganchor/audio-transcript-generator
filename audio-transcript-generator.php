@@ -3,7 +3,7 @@
 Plugin Name: AssemblyAI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API, now with enhanced error handling and dynamic post titles.
-Version: 1.5.4
+Version: 1.5.5
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -292,9 +292,8 @@ function assemblyai_create_transcript($api_key, $audio_url, $transcription_post_
         "webhook_url" => $webhook_url,
         "webhook_auth_header_name" => "Authorization",
         "webhook_auth_header_value" => $api_key,
-        // Optionally, you can pass the post ID in the webhook
-        "webhook_status_code" => 200,
-        "webhook_custom_data" => json_encode(['post_id' => $transcription_post_id]),
+        // Use "metadata" to pass the post ID
+        "metadata" => (string)$transcription_post_id,
     ];
 
     $ch = curl_init($url);
@@ -360,9 +359,8 @@ function assemblyai_webhook_callback($request) {
     if (isset($data['status']) && $data['status'] === 'completed') {
         $transcription_text = $data['text'];
 
-        // Retrieve the post ID from custom data
-        $custom_data = json_decode($data['webhook_custom_data'], true);
-        $transcription_post_id = $custom_data['post_id'];
+        // Retrieve the post ID from the metadata
+        $transcription_post_id = $data['metadata'];
 
         // Process transcription with GPT
         $processed_transcription = process_transcription_with_gpt($transcription_text);
