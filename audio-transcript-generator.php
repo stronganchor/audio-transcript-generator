@@ -631,19 +631,6 @@ function whisper_render_transcription_meta_box($post) {
     <?php
 }
 
-// Enqueue the necessary JavaScript for the meta box
-function whisper_enqueue_admin_scripts($hook_suffix) {
-    if ($hook_suffix === 'post.php' || $hook_suffix === 'post-new.php') {
-        wp_enqueue_script('assemblyai-transcription', plugin_dir_url(__FILE__) . 'js/assemblyai-admin-transcription.js', [], false, true);
-        wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'assemblyai_api_key' => get_option('assemblyai_api_key'),
-            'post_id' => get_the_ID(),
-        ]);
-    }
-}
-add_action('admin_enqueue_scripts', 'whisper_enqueue_admin_scripts');
-
 add_action('wp_ajax_append_transcription_to_post', 'append_transcription_to_post');
 
 function append_transcription_to_post() {
