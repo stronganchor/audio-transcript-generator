@@ -1,15 +1,10 @@
 document.addEventListener('DOMContentLoaded', function() { 
     const transcriptionButton = document.querySelector('#transcribeButton');
-    
+
     if (transcriptionButton) {
         transcriptionButton.addEventListener('click', async function() {
-            const audioUrl = document.querySelector('#audio_url').value;
+            const audioUrl = document.querySelector('#audio_url').value; // Get the URL input from the user
             const apiKey = assemblyai_settings.assemblyai_api_key;
-
-            if (!audioUrl) {
-                alert('Please enter a valid URL.');
-                return;
-            }
 
             try {
                 const params = {
