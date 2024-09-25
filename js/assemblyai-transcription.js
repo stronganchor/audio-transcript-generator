@@ -1,20 +1,10 @@
 document.addEventListener('DOMContentLoaded', function() {
-    // Check if we are in the admin panel (post editor) or the frontend
-    const transcribeButton = document.querySelector('#whisper_transcribe_button') || document.querySelector('#transcribeButton');
-    const statusDiv = document.querySelector('#whisper_transcription_status') || document.querySelector('#transcriptionForm');
-
-    if (transcribeButton) {
-        transcribeButton.addEventListener('click', async function() {
-            const audioUrl = document.querySelector('#whisper_transcription_url')?.value || document.querySelector('#audio_url')?.value;
+    const transcriptionButton = document.querySelector('#transcribeButton');
+    
+    if (transcriptionButton) {
+        transcriptionButton.addEventListener('click', async function() {
+            const audioUrl = 'https://storage.googleapis.com/aai-web-samples/5_common_sports_injuries.mp3'; // Hardcoded URL
             const apiKey = assemblyai_settings.assemblyai_api_key;
-            const postId = assemblyai_settings.post_id || null;
-
-            if (!audioUrl) {
-                alert('Please enter a valid URL.');
-                return;
-            }
-
-            statusDiv.innerHTML = 'Starting transcription...';
 
             try {
                 const params = {
@@ -22,7 +12,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     speaker_labels: true,
                 };
 
-                // Send request to AssemblyAI
+                // Send request to start transcription
                 const response = await fetch('https://api.assemblyai.com/v2/transcript', {
                     method: 'POST',
                     headers: {
@@ -33,27 +23,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
 
                 const data = await response.json();
+
                 if (data.error) {
-                    statusDiv.innerHTML = `Transcription request failed: ${data.error}`;
+                    console.error(`Transcription request failed: ${data.error}`);
                     return;
                 }
 
                 console.log('Transcription initiated, polling for completion:', data);
-                statusDiv.innerHTML = 'Transcription started...';
 
-                // Poll for transcription completion
+                // Poll for status until transcription is complete
                 const transcriptId = data.id;
-                await pollTranscriptionStatus(apiKey, transcriptId, postId, statusDiv);
+                pollTranscriptionStatus(apiKey, transcriptId);
 
             } catch (error) {
                 console.error('Error during transcription request:', error);
-                statusDiv.innerHTML = 'An error occurred during transcription.';
             }
         });
     }
 
-    // Polling function
-    async function pollTranscriptionStatus(apiKey, transcriptId, postId, statusDiv) {
+    async function pollTranscriptionStatus(apiKey, transcriptId) {
         let transcriptionCompleted = false;
 
         while (!transcriptionCompleted) {
@@ -64,54 +52,41 @@ document.addEventListener('DOMContentLoaded', function() {
                     'content-type': 'application/json',
                 },
             });
-
+            
             const pollData = await pollResponse.json();
 
             if (pollData.status === 'completed') {
                 transcriptionCompleted = true;
                 console.log('Transcription completed:', pollData.text);
-                statusDiv.innerHTML = 'Transcription completed. Appending to post content...';
-                
-                // Append the transcription to the post content if we are in admin
-                if (postId) {
-                    await appendTranscriptionToPost(pollData.text, postId);
-                    statusDiv.innerHTML = 'Transcription appended to post content.';
-                }
+                // Optionally, save the transcription to WordPress
+                saveTranscriptionToWordPress(pollData.text);
             } else if (pollData.status === 'failed') {
                 console.error(`Transcription failed: ${pollData.error}`);
-                statusDiv.innerHTML = `Transcription failed: ${pollData.error}`;
                 transcriptionCompleted = true;
             } else {
                 console.log(`Transcription status: ${pollData.status}. Polling again in 5 seconds...`);
-                statusDiv.innerHTML = `Transcription status: ${pollData.status}. Polling again...`;
                 await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before polling again
             }
         }
     }
 
-    // Function to append transcription to the post content
-    async function appendTranscriptionToPost(transcriptionText, postId) {
-        try {
-            const response = await fetch(assemblyai_settings.ajax_url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: new URLSearchParams({
-                    action: 'append_transcription_to_post',
-                    transcription: transcriptionText,
-                    post_id: postId
-                }),
-            });
+    async function saveTranscriptionToWordPress(transcriptionText) {
+        const response = await fetch(assemblyai_settings.ajax_url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                action: 'save_transcription',
+                transcription: transcriptionText
+            }),
+        });
 
-            const result = await response.json();
-            if (result.success) {
-                console.log('Transcription appended to post successfully:', result);
-            } else {
-                console.error('Failed to append transcription to post:', result);
-            }
-        } catch (error) {
-            console.error('Error appending transcription to post:', error);
+        const result = await response.json();
+        if (result.success) {
+            console.log('Transcription saved to WordPress post:', result);
+        } else {
+            console.error('Failed to save transcription:', result);
         }
     }
 });
