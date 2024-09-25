@@ -29,6 +29,26 @@ $myUpdateChecker->setBranch('main');
 // Include the WP Background Processing library
 require_once plugin_dir_path(__FILE__) . 'includes/wp-background-processing.php';
 
+add_action('wp_ajax_upload_audio_file', 'upload_audio_file');
+add_action('wp_ajax_nopriv_upload_audio_file', 'upload_audio_file');
+
+function upload_audio_file() {
+    if (isset($_FILES['audio_file'])) {
+        $uploaded_file = $_FILES['audio_file'];
+
+        // Use WordPress's media uploader
+        $upload_result = wp_handle_upload($uploaded_file, ['test_form' => false]);
+
+        if (isset($upload_result['url'])) {
+            wp_send_json_success(['file_url' => $upload_result['url']]);
+        } else {
+            wp_send_json_error(['message' => 'File upload failed.']);
+        }
+    } else {
+        wp_send_json_error(['message' => 'No file uploaded.']);
+    }
+}
+
 add_action('wp_ajax_save_transcription', 'save_transcription_callback');
 add_action('wp_ajax_nopriv_save_transcription', 'save_transcription_callback');
 
