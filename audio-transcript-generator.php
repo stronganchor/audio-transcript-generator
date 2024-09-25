@@ -3,7 +3,7 @@
 Plugin Name: AssemblyAI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API, now with enhanced error handling and dynamic post titles.
-Version: 1.6.2
+Version: 1.6.3
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -523,27 +523,12 @@ function process_transcription_with_gpt($transcription_text) {
 function whisper_audio_transcription_shortcode($atts) {
     ob_start();
     ?>
-    <form id="transcriptionForm" method="post" enctype="multipart/form-data">
-        <h2>Choose how to submit your audio file for transcription</h2>
+    <form id="transcriptionForm" method="post">
+        <h2>Enter a URL to an audio file for transcription</h2>
         
-        <!-- Radio buttons to choose between file upload and URL input -->
-        <input type="radio" id="uploadOption" name="transcription_type" value="upload" checked>
-        <label for="uploadOption">Upload an audio file</label><br>
-        
-        <input type="radio" id="urlOption" name="transcription_type" value="url">
-        <label for="urlOption">Enter a URL to an audio file</label><br>
-        
-        <!-- File upload input -->
-        <div id="fileUploadSection">
-            <label for="audio_file">Choose audio file:</label>
-            <input type="file" id="audio_file" name="audio_file" accept="audio/*">
-        </div>
-
         <!-- URL input -->
-        <div id="urlSection" style="display: none;">
-            <label for="audio_url">Enter URL:</label>
-            <input type="url" id="audio_url" name="audio_url" placeholder="https://example.com/audio.mp3">
-        </div>
+        <label for="audio_url">Enter URL:</label>
+        <input type="url" id="audio_url" name="audio_url" placeholder="https://example.com/audio.mp3" required>
 
         <button type="button" id="transcribeButton">Transcribe</button>
     </form>
@@ -611,4 +596,41 @@ function whisper_audio_transcription_setting_input_assemblyai() {
     $api_key = get_option('assemblyai_api_key');
     echo "<input id='assemblyai_api_key' name='assemblyai_api_key' type='password' value='" . esc_attr($api_key) . "' />";
 }
+
+// Add a meta box to post edit screens for entering a transcription URL
+function whisper_add_transcription_meta_box() {
+    add_meta_box(
+        'whisper_transcription_meta_box',
+        'Audio Transcription',
+        'whisper_render_transcription_meta_box',
+        ['post', 'your_custom_post_type'], // Add 'post' and any custom post types where you want this meta box
+        'side',
+        'high'
+    );
+}
+add_action('add_meta_boxes', 'whisper_add_transcription_meta_box');
+
+// Render the transcription meta box
+function whisper_render_transcription_meta_box($post) {
+    ?>
+    <label for="whisper_transcription_url">Enter URL for Transcription:</label>
+    <input type="url" id="whisper_transcription_url" name="whisper_transcription_url" placeholder="https://example.com/audio.mp3" style="width: 100%; margin-top: 10px; margin-bottom: 10px;">
+    <button type="button" id="whisper_transcribe_button" class="button button-primary">Transcribe</button>
+    <div id="whisper_transcription_status" style="margin-top: 10px;"></div>
+    <?php
+}
+
+// Enqueue the necessary JavaScript for the meta box
+function whisper_enqueue_admin_scripts($hook_suffix) {
+    if ($hook_suffix === 'post.php' || $hook_suffix === 'post-new.php') {
+        wp_enqueue_script('assemblyai-transcription', plugin_dir_url(__FILE__) . 'js/assemblyai-admin-transcription.js', [], false, true);
+        wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'assemblyai_api_key' => get_option('assemblyai_api_key'),
+            'post_id' => get_the_ID(),
+        ]);
+    }
+}
+add_action('admin_enqueue_scripts', 'whisper_enqueue_admin_scripts');
+
 ?>
