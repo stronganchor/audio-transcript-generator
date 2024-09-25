@@ -3,7 +3,7 @@
 Plugin Name: AssemblyAI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API, now with enhanced error handling and dynamic post titles.
-Version: 1.5.7
+Version: 1.5.8
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -28,6 +28,40 @@ $myUpdateChecker->setBranch('main');
 
 // Include the WP Background Processing library
 require_once plugin_dir_path(__FILE__) . 'includes/wp-background-processing.php';
+
+add_action('wp_ajax_save_transcription', 'save_transcription_callback');
+add_action('wp_ajax_nopriv_save_transcription', 'save_transcription_callback');
+
+function save_transcription_callback() {
+    if (isset($_POST['transcription'])) {
+        $transcription_text = sanitize_text_field($_POST['transcription']);
+
+        // Insert the transcription as a new post
+        $post_id = wp_insert_post([
+            'post_title' => 'Transcription',
+            'post_content' => $transcription_text,
+            'post_status' => 'publish',
+            'post_type' => 'transcription',
+        ]);
+
+        if ($post_id) {
+            wp_send_json_success(['post_id' => $post_id]);
+        } else {
+            wp_send_json_error(['message' => 'Failed to create transcription post']);
+        }
+    } else {
+        wp_send_json_error(['message' => 'No transcription text provided']);
+    }
+}
+
+function enqueue_transcription_script() {
+    wp_enqueue_script('assemblyai-transcription', plugin_dir_url(__FILE__) . 'js/assemblyai-transcription.js', [], false, true);
+    wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
+        'ajax_url' => admin_url('admin-ajax.php'),
+        'assemblyai_api_key' => get_option('assemblyai_api_key'),
+    ]);
+}
+add_action('wp_enqueue_scripts', 'enqueue_transcription_script');
 
 // Extend the WP_Background_Process class
 class AssemblyAI_Transcription_Process extends WP_Background_Process {
@@ -463,8 +497,18 @@ function process_transcription_with_gpt($transcription_text) {
     }
 }
 
-// Shortcode function to display the upload form and handle the transcription (unchanged)
+// Shortcode function to display the upload form and handle the transcription
 function whisper_audio_transcription_shortcode($atts) {
+    ob_start();
+    ?>
+    <button id="transcribeButton">Transcribe Hardcoded Audio</button>
+    <?php
+    return ob_get_clean();
+}
+add_shortcode('whisper_audio_transcription', 'whisper_audio_transcription_shortcode');
+
+
+/*function whisper_audio_transcription_shortcode($atts) {
     ob_start();
 
     if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['audio_file']) && $_FILES['audio_file']['error'] == UPLOAD_ERR_OK) {
@@ -507,7 +551,7 @@ function whisper_audio_transcription_shortcode($atts) {
 
     return ob_get_clean();
 }
-add_shortcode('whisper_audio_transcription', 'whisper_audio_transcription_shortcode');
+add_shortcode('whisper_audio_transcription', 'whisper_audio_transcription_shortcode');*/
 
 // Register custom post type for transcriptions (unchanged)
 function whisper_register_transcription_post_type() {
