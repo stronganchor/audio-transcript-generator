@@ -54,6 +54,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 console.log('Transcription initiated, polling for completion:', data);
+                statusDiv.innerHTML = statusDiv.innerHTML . 'Transcription process initiated for post ID: ' . postId;
 
                 // Poll for status until transcription is complete
                 const transcriptId = data.id;
