@@ -3,7 +3,7 @@
 Plugin Name: AssemblyAI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API, now with enhanced error handling and dynamic post titles.
-Version: 1.6.6
+Version: 1.6.7
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -28,26 +28,6 @@ $myUpdateChecker->setBranch('main');
 
 // Include the WP Background Processing library
 require_once plugin_dir_path(__FILE__) . 'includes/wp-background-processing.php';
-
-add_action('wp_ajax_upload_audio_file', 'upload_audio_file');
-add_action('wp_ajax_nopriv_upload_audio_file', 'upload_audio_file');
-
-function upload_audio_file() {
-    if (isset($_FILES['audio_file'])) {
-        $uploaded_file = $_FILES['audio_file'];
-
-        // Use WordPress's media uploader
-        $upload_result = wp_handle_upload($uploaded_file, ['test_form' => false]);
-
-        if (isset($upload_result['url'])) {
-            wp_send_json_success(['file_url' => $upload_result['url']]);
-        } else {
-            wp_send_json_error(['message' => 'File upload failed.']);
-        }
-    } else {
-        wp_send_json_error(['message' => 'No file uploaded.']);
-    }
-}
 
 add_action('wp_ajax_save_transcription', 'save_transcription_callback');
 add_action('wp_ajax_nopriv_save_transcription', 'save_transcription_callback');
@@ -78,21 +58,10 @@ function enqueue_transcription_script() {
     $relative_path = 'js/assemblyai-transcription.js';
     $asset_version = filemtime(plugin_dir_path(__FILE__) . $relative_path);
     wp_enqueue_script('assemblyai-transcription', plugin_dir_url(__FILE__) . $relative_path, [], $asset_version, true);
-    // Localize script to pass data to JavaScript
-    if (is_admin() && ($hook_suffix === 'post.php' || $hook_suffix === 'post-new.php')) {
-        // Admin screen (post editor)
-        wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'assemblyai_api_key' => get_option('assemblyai_api_key'),
-            'post_id' => get_the_ID(),
-        ]);
-    } else {
-        // Frontend screen
-        wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'assemblyai_api_key' => get_option('assemblyai_api_key'),
-        ]);
-    }
+    wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
+        'ajax_url' => admin_url('admin-ajax.php'),
+        'assemblyai_api_key' => get_option('assemblyai_api_key'),
+    ]);
 }
 add_action('wp_enqueue_scripts', 'enqueue_transcription_script');
 
@@ -534,12 +503,27 @@ function process_transcription_with_gpt($transcription_text) {
 function whisper_audio_transcription_shortcode($atts) {
     ob_start();
     ?>
-    <form id="transcriptionForm" method="post">
-        <h2>Enter a URL to an audio file for transcription</h2>
+    <form id="transcriptionForm" method="post" enctype="multipart/form-data">
+        <h2>Choose how to submit your audio file for transcription</h2>
         
+        <!-- Radio buttons to choose between file upload and URL input -->
+        <input type="radio" id="uploadOption" name="transcription_type" value="upload" checked>
+        <label for="uploadOption">Upload an audio file</label><br>
+        
+        <input type="radio" id="urlOption" name="transcription_type" value="url">
+        <label for="urlOption">Enter a URL to an audio file</label><br>
+        
+        <!-- File upload input -->
+        <div id="fileUploadSection">
+            <label for="audio_file">Choose audio file:</label>
+            <input type="file" id="audio_file" name="audio_file" accept="audio/*">
+        </div>
+
         <!-- URL input -->
-        <label for="audio_url">Enter URL:</label>
-        <input type="url" id="audio_url" name="audio_url" placeholder="https://example.com/audio.mp3" required>
+        <div id="urlSection" style="display: none;">
+            <label for="audio_url">Enter URL:</label>
+            <input type="url" id="audio_url" name="audio_url" placeholder="https://example.com/audio.mp3">
+        </div>
 
         <button type="button" id="transcribeButton">Transcribe</button>
     </form>
@@ -607,57 +591,4 @@ function whisper_audio_transcription_setting_input_assemblyai() {
     $api_key = get_option('assemblyai_api_key');
     echo "<input id='assemblyai_api_key' name='assemblyai_api_key' type='password' value='" . esc_attr($api_key) . "' />";
 }
-
-// Add a meta box to post edit screens for entering a transcription URL
-function whisper_add_transcription_meta_box() {
-    add_meta_box(
-        'whisper_transcription_meta_box',
-        'Audio Transcription',
-        'whisper_render_transcription_meta_box',
-        ['post', 'sermon', 'sermons', 'wpfc_sermon'], // Add 'post' and any custom post types where you want this meta box
-        'side',
-        'high'
-    );
-}
-add_action('add_meta_boxes', 'whisper_add_transcription_meta_box');
-
-// Render the transcription meta box
-function whisper_render_transcription_meta_box($post) {
-    ?>
-    <label for="whisper_transcription_url">Enter URL for Transcription:</label>
-    <input type="url" id="whisper_transcription_url" name="whisper_transcription_url" placeholder="https://example.com/audio.mp3" style="width: 100%; margin-top: 10px; margin-bottom: 10px;">
-    <button type="button" id="whisper_transcribe_button" class="button button-primary">Transcribe</button>
-    <div id="whisper_transcription_status" style="margin-top: 10px;"></div>
-    <?php
-}
-
-add_action('wp_ajax_append_transcription_to_post', 'append_transcription_to_post');
-
-function append_transcription_to_post() {
-    if (isset($_POST['transcription']) && isset($_POST['post_id'])) {
-        $transcription_text = sanitize_text_field($_POST['transcription']);
-        $post_id = intval($_POST['post_id']);
-
-        // Get the current post content
-        $post_content = get_post_field('post_content', $post_id);
-
-        // Append the transcription to the existing content
-        $new_content = $post_content . "\n\n" . '<h2>Transcription:</h2>' . "\n" . $transcription_text;
-
-        // Update the post with the new content
-        $update_result = wp_update_post([
-            'ID' => $post_id,
-            'post_content' => $new_content,
-        ]);
-
-        if ($update_result) {
-            wp_send_json_success(['post_id' => $post_id]);
-        } else {
-            wp_send_json_error(['message' => 'Failed to append transcription to post.']);
-        }
-    } else {
-        wp_send_json_error(['message' => 'Invalid transcription data or post ID.']);
-    }
-}
-
 ?>
