@@ -63,7 +63,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.error('Error during transcription request:', error);
                 transcriptionButton.disabled = false;  // Enable the button again
                 document.querySelector('#audio_url').disabled = false;  // Enable input
-                statusDiv.innerHTML = 'An error occurred during transcription.';
+                statusDiv.innerHTML = 'An error occurred during transcription: ' . error;
             }
         });
     }
@@ -85,10 +85,8 @@ document.addEventListener('DOMContentLoaded', function() {
     
             if (pollData.status === 'completed') {
                 transcriptionCompleted = true;
-                statusDiv.innerHTML = 'Transcription completed!';
+                statusDiv.innerHTML = statusDiv.innerHTML . '<br>Transcription completed. Starting post-processing...';
                 console.log('Transcription completed:', pollData.text);
-                // Display the transcription on the page
-                transcriptionContainer.innerHTML = `<h2>Transcription Result:</h2><p>${pollData.text}</p>`;
                 // Save the transcription to WordPress and append it to the current post
                 saveTranscriptionToWordPress(pollData.text, audioUrl, postId);
     
@@ -97,8 +95,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 statusDiv.innerHTML = `Transcription failed: ${pollData.error}`;
                 transcriptionCompleted = true;
             } else {
-                console.log(`Transcription status: ${pollData.status}. Polling again in 5 seconds...`);
-                statusDiv.innerHTML = `Transcription in progress: ${pollData.status}. Polling again...`;
+                console.log(`Transcription status: ${pollData.status}. Checking again in 5 seconds...`);
+                statusDiv.innerHTML = statusDiv.innerHTML . `<br>Status: ${pollData.status}. Checking again...`;
                 await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before polling again
             }
         }
