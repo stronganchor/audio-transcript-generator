@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field, with GPT-4o-mini post-processing.
-Version: 1.8.5
+Version: 1.8.6
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -60,21 +60,34 @@ function whisper_render_transcription_meta_box($post) {
 
 // Helper function to find an audio URL in the post content or metadata
 function whisper_find_audio_url($post_id) {
+    // Retrieve the post content
     $post_content = get_post_field('post_content', $post_id);
-    $meta_audio_url = get_post_meta($post_id, 'audio_url', true);
 
-    // Check for an audio URL in the content (could be a link to an .mp3, .wav, etc.)
-    if (preg_match('/(http[s]?:\/\/[^\s]+?\.(mp3|wav|ogg))/', $post_content, $matches)) {
-        return $matches[1]; // Return the first matched URL
+    // Define the regex pattern for matching audio URLs
+    $audio_url_pattern = '/https?:\/\/[^\s"\'<>]+?\.(mp3|wav|ogg)/i';
+
+    // 1. Check for an audio URL in the post content
+    if (preg_match($audio_url_pattern, $post_content, $matches)) {
+        return esc_url_raw($matches[0]); // Return the first matched URL
     }
 
-    // Return the audio URL from post meta if it exists
-    if (!empty($meta_audio_url)) {
-        return $meta_audio_url;
+    // 2. Retrieve all metadata for the post
+    $all_meta = get_post_meta($post_id);
+
+    // Iterate through each meta key and its associated values
+    foreach ($all_meta as $meta_key => $meta_values) {
+        foreach ($meta_values as $meta_value) {
+            // Ensure the meta value is a string before applying regex
+            if (is_string($meta_value) && preg_match($audio_url_pattern, $meta_value, $matches)) {
+                return esc_url_raw($matches[0]); // Return the first matched URL
+            }
+        }
     }
 
-    return ''; // Return an empty string if no URL is found
+    // 3. If no audio URL is found, return an empty string
+    return '';
 }
+
 
 // Function to render the transcription shortcode form below the title
 function whisper_transcription_admin_shortcode_after_title($content) {
