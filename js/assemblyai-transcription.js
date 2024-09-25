@@ -1,10 +1,25 @@
 document.addEventListener('DOMContentLoaded', function() { 
     const transcriptionButton = document.querySelector('#transcribeButton');
+    const statusDiv = document.createElement('div');
+    const transcriptionContainer = document.createElement('div');
+    
+    // Add a status div to the page to show progress
+    document.body.appendChild(statusDiv);
+    document.body.appendChild(transcriptionContainer);
 
     if (transcriptionButton) {
         transcriptionButton.addEventListener('click', async function() {
-            const audioUrl = document.querySelector('#audio_url').value; // Get the URL input from the user
+            // Reset the status div
+            statusDiv.innerHTML = 'Starting transcription...';
+            transcriptionContainer.innerHTML = ''; // Clear previous transcription
+
+            const audioUrl = document.querySelector('#audio_url').value; // URL from user input
             const apiKey = assemblyai_settings.assemblyai_api_key;
+
+            if (!audioUrl) {
+                alert('Please enter a valid URL.');
+                return;
+            }
 
             try {
                 const params = {
@@ -25,7 +40,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const data = await response.json();
 
                 if (data.error) {
-                    console.error(`Transcription request failed: ${data.error}`);
+                    statusDiv.innerHTML = `Transcription request failed: ${data.error}`;
                     return;
                 }
 
@@ -37,10 +52,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
             } catch (error) {
                 console.error('Error during transcription request:', error);
+                statusDiv.innerHTML = 'An error occurred during transcription.';
             }
         });
     }
 
+    // Polling function for transcription status
     async function pollTranscriptionStatus(apiKey, transcriptId) {
         let transcriptionCompleted = false;
 
@@ -57,19 +74,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
             if (pollData.status === 'completed') {
                 transcriptionCompleted = true;
+                statusDiv.innerHTML = 'Transcription completed!';
                 console.log('Transcription completed:', pollData.text);
+                // Display the transcription on the page
+                transcriptionContainer.innerHTML = `<h2>Transcription Result:</h2><p>${pollData.text}</p>`;
                 // Optionally, save the transcription to WordPress
                 saveTranscriptionToWordPress(pollData.text);
+
             } else if (pollData.status === 'failed') {
                 console.error(`Transcription failed: ${pollData.error}`);
+                statusDiv.innerHTML = `Transcription failed: ${pollData.error}`;
                 transcriptionCompleted = true;
             } else {
                 console.log(`Transcription status: ${pollData.status}. Polling again in 5 seconds...`);
+                statusDiv.innerHTML = `Transcription in progress: ${pollData.status}. Polling again...`;
                 await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before polling again
             }
         }
     }
 
+    // Function to save transcription to WordPress
     async function saveTranscriptionToWordPress(transcriptionText) {
         const response = await fetch(assemblyai_settings.ajax_url, {
             method: 'POST',
