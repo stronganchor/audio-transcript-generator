@@ -1,12 +1,13 @@
 document.addEventListener('DOMContentLoaded', function() {
-    const transcribeButton = document.querySelector('#whisper_transcribe_button');
-    const statusDiv = document.querySelector('#whisper_transcription_status');
+    // Check if we are in the admin panel (post editor) or the frontend
+    const transcribeButton = document.querySelector('#whisper_transcribe_button') || document.querySelector('#transcribeButton');
+    const statusDiv = document.querySelector('#whisper_transcription_status') || document.querySelector('#transcriptionForm');
 
     if (transcribeButton) {
         transcribeButton.addEventListener('click', async function() {
-            const audioUrl = document.querySelector('#whisper_transcription_url').value;
+            const audioUrl = document.querySelector('#whisper_transcription_url')?.value || document.querySelector('#audio_url')?.value;
             const apiKey = assemblyai_settings.assemblyai_api_key;
-            const postId = assemblyai_settings.post_id;
+            const postId = assemblyai_settings.post_id || null;
 
             if (!audioUrl) {
                 alert('Please enter a valid URL.');
@@ -71,9 +72,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.log('Transcription completed:', pollData.text);
                 statusDiv.innerHTML = 'Transcription completed. Appending to post content...';
                 
-                // Append the transcription to the post content
-                await appendTranscriptionToPost(pollData.text, postId);
-                statusDiv.innerHTML = 'Transcription appended to post content.';
+                // Append the transcription to the post content if we are in admin
+                if (postId) {
+                    await appendTranscriptionToPost(pollData.text, postId);
+                    statusDiv.innerHTML = 'Transcription appended to post content.';
+                }
             } else if (pollData.status === 'failed') {
                 console.error(`Transcription failed: ${pollData.error}`);
                 statusDiv.innerHTML = `Transcription failed: ${pollData.error}`;
