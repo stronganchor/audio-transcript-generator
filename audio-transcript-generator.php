@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field, with GPT-4o-mini post-processing.
-Version: 1.7.0
+Version: 1.7.1
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -31,27 +31,32 @@ add_action('wp_ajax_save_transcription', 'save_transcription_callback');
 add_action('wp_ajax_nopriv_save_transcription', 'save_transcription_callback');
 
 function save_transcription_callback() {
-    if (isset($_POST['transcription'])) {
-        $transcription_text = sanitize_text_field($_POST['transcription']);
+    try {
+        if (isset($_POST['transcription'])) {
+            $transcription_text = sanitize_text_field($_POST['transcription']);
 
-        // Send transcription text to OpenAI for post-processing
-        $processed_transcription = process_transcription_with_gpt($transcription_text);
+            // Send transcription text to OpenAI for post-processing
+            $processed_transcription = process_transcription_with_gpt($transcription_text);
 
-        // Insert the processed transcription as a new post
-        $post_id = wp_insert_post([
-            'post_title' => 'Transcription',
-            'post_content' => $processed_transcription,
-            'post_status' => 'publish',
-            'post_type' => 'transcription',
-        ]);
+            // Insert the processed transcription as a new post
+            $post_id = wp_insert_post([
+                'post_title' => 'Transcription',
+                'post_content' => $processed_transcription,
+                'post_status' => 'publish',
+                'post_type' => 'transcription',
+            ]);
 
-        if ($post_id) {
-            wp_send_json_success(['post_id' => $post_id]);
+            if ($post_id) {
+                wp_send_json_success(['post_id' => $post_id]);
+            } else {
+                wp_send_json_error(['message' => 'Failed to create transcription post']);
+            }
         } else {
-            wp_send_json_error(['message' => 'Failed to create transcription post']);
+            wp_send_json_error(['message' => 'No transcription text provided']);
         }
-    } else {
-        wp_send_json_error(['message' => 'No transcription text provided']);
+    } catch (Exception $e) {
+        error_log("Error in save_transcription_callback: " . $e->getMessage());
+        wp_send_json_error(['message' => 'An error occurred: ' . $e->getMessage()]);
     }
 }
 
