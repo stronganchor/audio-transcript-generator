@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field, with GPT-4o-mini post-processing.
-Version: 1.7.5
+Version: 1.7.6
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -54,15 +54,19 @@ add_action('wp_ajax_nopriv_save_transcription', 'save_transcription_callback');
 
 function save_transcription_callback() {
     try {
-        if (isset($_POST['transcription'])) {
+        if (isset($_POST['transcription']) && isset($_POST['audio_url'])) {
             $transcription_text = sanitize_text_field($_POST['transcription']);
+            $audio_url = sanitize_text_field($_POST['audio_url']);
+
+            // Extract the file name from the audio URL
+            $audio_file_name = basename(parse_url($audio_url, PHP_URL_PATH)); // This will give you "example.mp3"
 
             // Send transcription text to OpenAI for post-processing
             $processed_transcription = process_transcription_with_gpt($transcription_text);
 
-            // Insert the processed transcription as a new post
+            // Insert the processed transcription as a new post with the audio file name as the title
             $post_id = wp_insert_post([
-                'post_title' => 'Transcription',
+                'post_title' => $audio_file_name,  // Set the title as the audio file name
                 'post_content' => $processed_transcription,
                 'post_status' => 'publish',
                 'post_type' => 'transcription',
@@ -74,7 +78,7 @@ function save_transcription_callback() {
                 wp_send_json_error(['message' => 'Failed to create transcription post']);
             }
         } else {
-            wp_send_json_error(['message' => 'No transcription text provided']);
+            wp_send_json_error(['message' => 'No transcription text or audio URL provided']);
         }
     } catch (Exception $e) {
         error_log("Error in save_transcription_callback: " . $e->getMessage());
