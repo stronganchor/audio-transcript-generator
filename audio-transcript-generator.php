@@ -3,7 +3,7 @@
 Plugin Name: AssemblyAI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API, now with enhanced error handling and dynamic post titles.
-Version: 1.5.5
+Version: 1.5.6
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -274,8 +274,9 @@ function assemblyai_upload_file($api_key, $path) {
 }
 
 // Function to create a transcript using AssemblyAI API with webhook support
+// Function to create a transcript using AssemblyAI API without webhook
 function assemblyai_create_transcript($api_key, $audio_url, $transcription_post_id) {
-    error_log("[" . date('Y-m-d H:i:s') . "] Creating transcript with AssemblyAI using webhook");
+    error_log("[" . date('Y-m-d H:i:s') . "] Creating transcript with AssemblyAI");
 
     $url = "https://api.assemblyai.com/v2/transcript";
 
@@ -284,16 +285,8 @@ function assemblyai_create_transcript($api_key, $audio_url, $transcription_post_
         "content-type: application/json",
     ];
 
-    // Get site URL and set webhook endpoint
-    $webhook_url = site_url('/wp-json/assemblyai/v1/webhook');
-
     $data = [
         "audio_url" => $audio_url,
-        "webhook_url" => $webhook_url,
-        "webhook_auth_header_name" => "Authorization",
-        "webhook_auth_header_value" => $api_key,
-        // Use "metadata" to pass the post ID
-        "metadata" => (string)$transcription_post_id,
     ];
 
     $ch = curl_init($url);
@@ -316,7 +309,6 @@ function assemblyai_create_transcript($api_key, $audio_url, $transcription_post_
     }
 
     $http_status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
     curl_close($ch);
 
     if ($http_status != 200) {
@@ -325,66 +317,72 @@ function assemblyai_create_transcript($api_key, $audio_url, $transcription_post_
     }
 
     $response_data = json_decode($response, true);
-
     if (!isset($response_data['id'])) {
         error_log("[" . date('Y-m-d H:i:s') . "] AssemblyAI create_transcript response does not contain id");
         return ['error' => 'AssemblyAI create_transcript response does not contain id'];
     }
 
-    // Since we're using webhooks, we don't need to poll. Return the transcript ID.
-    return $response_data;
+    // Poll for the transcription status
+    $transcript_id = $response_data['id'];
+    return assemblyai_poll_transcript($api_key, $transcript_id);
 }
 
-// Add a REST API endpoint to handle the webhook
-add_action('rest_api_init', function () {
-    register_rest_route('assemblyai/v1', '/webhook', [
-        'methods' => 'POST',
-        'callback' => 'assemblyai_webhook_callback',
-        'permission_callback' => '__return_true', // Adjust as needed for security
-    ]);
-});
+// Function to poll AssemblyAI for transcript status
+function assemblyai_poll_transcript($api_key, $transcript_id) {
+    $poll_url = "https://api.assemblyai.com/v2/transcript/" . $transcript_id;
 
-function assemblyai_webhook_callback($request) {
-    $api_key = get_option('assemblyai_api_key');
-    $headers = $request->get_headers();
+    $headers = [
+        "authorization: " . $api_key,
+        "content-type: application/json",
+    ];
 
-    // Verify the webhook using the auth header
-    if (!isset($headers['authorization'][0]) || $headers['authorization'][0] !== $api_key) {
-        return new WP_Error('rest_forbidden', esc_html__('Invalid authorization header.'), ['status' => 403]);
-    }
+    $status = "";
+    $poll_interval = 5; // Check every 5 seconds
+    $max_polls = 120; // Stop after 10 minutes
+    $poll_count = 0;
 
-    $body = $request->get_body();
-    $data = json_decode($body, true);
+    while ($poll_count < $max_polls) {
+        $ch = curl_init($poll_url);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 
-    if (isset($data['status']) && $data['status'] === 'completed') {
-        $transcription_text = $data['text'];
+        $response = curl_exec($ch);
 
-        // Retrieve the post ID from the metadata
-        $transcription_post_id = $data['metadata'];
-
-        // Process transcription with GPT
-        $processed_transcription = process_transcription_with_gpt($transcription_text);
-
-        // Extract the first 10 words for the post title
-        $title = wp_trim_words($processed_transcription, 10, '...');
-
-        $update_result = wp_update_post([
-            'ID' => $transcription_post_id,
-            'post_title' => $title,
-            'post_content' => wp_kses_post($processed_transcription),
-            'post_status' => 'publish',
-        ], true);
-
-        if (is_wp_error($update_result)) {
-            error_log("[" . date('Y-m-d H:i:s') . "] Error updating post ID $transcription_post_id: " . $update_result->get_error_message());
-        } else {
-            error_log("[" . date('Y-m-d H:i:s') . "] Successfully updated post ID $transcription_post_id");
+        if (curl_errno($ch)) {
+            $curl_error = curl_error($ch);
+            error_log("[" . date('Y-m-d H:i:s') . "] cURL error in AssemblyAI polling: $curl_error");
+            curl_close($ch);
+            return ['error' => $curl_error];
         }
-    } else {
-        error_log("[" . date('Y-m-d H:i:s') . "] Webhook received with status: " . $data['status']);
+
+        $http_status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($http_status != 200) {
+            error_log("[" . date('Y-m-d H:i:s') . "] AssemblyAI polling error: HTTP status $http_status, response: $response");
+            return ['error' => 'AssemblyAI polling error: ' . $response];
+        }
+
+        $response_data = json_decode($response, true);
+
+        if (isset($response_data['status'])) {
+            $status = $response_data['status'];
+            if ($status === 'completed') {
+                error_log("[" . date('Y-m-d H:i:s') . "] Transcription completed");
+                return ['text' => $response_data['text']];
+            } elseif ($status === 'failed') {
+                error_log("[" . date('Y-m-d H:i:s') . "] Transcription failed: " . json_encode($response_data));
+                return ['error' => 'Transcription failed: ' . json_encode($response_data)];
+            }
+        }
+
+        error_log("[" . date('Y-m-d H:i:s') . "] Waiting for transcription, status: $status");
+        sleep($poll_interval);
+        $poll_count++;
     }
 
-    return new WP_REST_Response(['status' => 'success'], 200);
+    // Return an error if the transcription takes too long
+    return ['error' => 'Transcription timed out'];
 }
 
 // Function to process transcription text with OpenAI API (unchanged)
