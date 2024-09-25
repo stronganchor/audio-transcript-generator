@@ -24,11 +24,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 const data = await response.json();
 
                 if (data.status === 'error') {
-                    console.error(`Transcription failed: ${data.error}`);
+                    console.error(`Transcription failed: ${data.error} Raw response: ${data}`);
                     return;
                 }
 
-                console.log('Transcription completed:', data.text);
+                console.log('Transcription completed:', data);
                 data.utterances.forEach(utterance => {
                     console.log(`Speaker ${utterance.speaker}: ${utterance.text}`);
                 });
