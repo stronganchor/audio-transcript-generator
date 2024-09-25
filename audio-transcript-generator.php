@@ -3,7 +3,7 @@
 Plugin Name: AssemblyAI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API, now with enhanced error handling and dynamic post titles.
-Version: 1.5.3
+Version: 1.5.4
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -46,7 +46,7 @@ class AssemblyAI_Transcription_Process extends WP_Background_Process {
 
         try {
             // Handle the transcription
-            $transcription = assemblyai_handle_audio_transcription($audioPath, $error_response);
+            $transcription = assemblyai_handle_audio_transcription($audioPath, $transcription_post_id, $error_response);
 
             if ($transcription) {
                 // Send the transcription to OpenAI for post-processing
@@ -125,7 +125,7 @@ class AssemblyAI_Transcription_Process extends WP_Background_Process {
 $assemblyai_transcription_process = new AssemblyAI_Transcription_Process();
 
 // Function to handle audio transcription (used in background processing)
-function assemblyai_handle_audio_transcription($audioPath, &$error_response = '') {
+function assemblyai_handle_audio_transcription($audioPath, $transcription_post_id, &$error_response = '') {
     error_log("[" . date('Y-m-d H:i:s') . "] Starting assemblyai_handle_audio_transcription");
 
     // Check the file size
@@ -157,7 +157,7 @@ function assemblyai_handle_audio_transcription($audioPath, &$error_response = ''
 
     error_log("[" . date('Y-m-d H:i:s') . "] Sending audio file to AssemblyAI");
 
-    $response = send_audio_file_to_assemblyai($audioPath);
+    $response = send_audio_file_to_assemblyai($audioPath, $transcription_post_id);
 
     error_log("[" . date('Y-m-d H:i:s') . "] Received response from AssemblyAI");
 
@@ -194,7 +194,7 @@ function compress_audio_file($inputPath, $outputPath) {
 }
 
 // Function to send audio file to the AssemblyAI API
-function send_audio_file_to_assemblyai($audioPath) {
+function send_audio_file_to_assemblyai($audioPath, $transcription_post_id) {
     error_log("[" . date('Y-m-d H:i:s') . "] Starting send_audio_file_to_assemblyai");
 
     $api_key = get_option('assemblyai_api_key');
@@ -212,7 +212,7 @@ function send_audio_file_to_assemblyai($audioPath) {
     }
 
     // Create the transcript
-    $transcript_result = assemblyai_create_transcript($api_key, $upload_url);
+    $transcript_result = assemblyai_create_transcript($api_key, $upload_url, $transcription_post_id);
 
     if (isset($transcript_result['text'])) {
         error_log("[" . date('Y-m-d H:i:s') . "] Transcription received from AssemblyAI");
