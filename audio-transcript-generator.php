@@ -3,7 +3,7 @@
 Plugin Name: AssemblyAI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API, now with enhanced error handling and dynamic post titles.
-Version: 1.5.1
+Version: 1.5.2
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -383,7 +383,10 @@ function process_transcription_with_gpt($transcription_text) {
         ],
         [
             'role' => 'user',
-            'content' => "Perform basic editing tasks on the following sermon transcript.  Edit the punctuation and spelling but do not change the wording unless you think the transcription service made an error (for example, if it says 'our texture study this morning', you can correct it to 'our text for study this morning').  Make sure to put any Bible verses in quotations followed by the verse reference and translation."
+            'content' => "Perform basic editing tasks on the following sermon transcript.  " .
+                         "Edit the punctuation and spelling but do not change the wording unless you think the transcription service made an error " .
+                         "(for example, if it says 'our texture study this morning', you can correct it to 'our text for study this morning').  " .
+                         "Make sure to put any Bible verses in quotations followed by the verse reference and translation.\n\n" . $transcription_text,
         ],
     ];
 
