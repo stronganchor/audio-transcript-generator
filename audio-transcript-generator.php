@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field, with GPT-4o-mini post-processing.
-Version: 1.8.2
+Version: 1.8.3
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -250,6 +250,11 @@ function whisper_audio_transcription_shortcode($atts) {
         <input type="url" id="audio_url" name="audio_url" placeholder="https://example.com/audio.mp3" required>
 
         <button type="button" id="transcribeButton">Transcribe</button>
+
+        <!-- Hidden message to be displayed after submission -->
+        <div id="transcriptionStatus" style="display:none; margin-top: 15px;">
+            The audio file has been submitted for transcription. This may take a few minutes. You can navigate away and come back to this page to check for updates, or wait here.
+        </div>
     </form>
     <?php
     return ob_get_clean();
