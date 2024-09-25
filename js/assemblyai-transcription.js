@@ -1,115 +1,58 @@
 document.addEventListener('DOMContentLoaded', function() {
-    const transcriptionForm = document.querySelector('#transcriptionForm');
-    const transcriptionButton = document.querySelector('#transcribeButton');
-    const uploadOption = document.querySelector('#uploadOption');
-    const urlOption = document.querySelector('#urlOption');
-    const fileUploadSection = document.querySelector('#fileUploadSection');
-    const urlSection = document.querySelector('#urlSection');
-    
-    // Show/hide file upload or URL input based on the selected option
-    uploadOption.addEventListener('change', function() {
-        fileUploadSection.style.display = 'block';
-        urlSection.style.display = 'none';
-    });
-    
-    urlOption.addEventListener('change', function() {
-        fileUploadSection.style.display = 'none';
-        urlSection.style.display = 'block';
-    });
+    const transcribeButton = document.querySelector('#whisper_transcribe_button');
+    const statusDiv = document.querySelector('#whisper_transcription_status');
 
-    if (transcriptionButton) {
-        transcriptionButton.addEventListener('click', async function() {
+    if (transcribeButton) {
+        transcribeButton.addEventListener('click', async function() {
+            const audioUrl = document.querySelector('#whisper_transcription_url').value;
             const apiKey = assemblyai_settings.assemblyai_api_key;
+            const postId = assemblyai_settings.post_id;
 
-            if (uploadOption.checked) {
-                // Handle file upload
-                const audioFile = document.querySelector('#audio_file').files[0];
-                if (!audioFile) {
-                    alert('Please upload an audio file.');
+            if (!audioUrl) {
+                alert('Please enter a valid URL.');
+                return;
+            }
+
+            statusDiv.innerHTML = 'Starting transcription...';
+
+            try {
+                const params = {
+                    audio_url: audioUrl,
+                    speaker_labels: true,
+                };
+
+                // Send request to AssemblyAI
+                const response = await fetch('https://api.assemblyai.com/v2/transcript', {
+                    method: 'POST',
+                    headers: {
+                        'authorization': apiKey,
+                        'content-type': 'application/json',
+                    },
+                    body: JSON.stringify(params),
+                });
+
+                const data = await response.json();
+                if (data.error) {
+                    statusDiv.innerHTML = `Transcription request failed: ${data.error}`;
                     return;
                 }
-                const fileUrl = await uploadFileToServer(audioFile);
-                if (!fileUrl) {
-                    alert('File upload failed.');
-                    return;
-                }
-                console.log('File uploaded. Now sending to AssemblyAI.');
-                await sendToAssemblyAI(fileUrl, apiKey);
-            } else if (urlOption.checked) {
-                // Handle URL input
-                const audioUrl = document.querySelector('#audio_url').value;
-                if (!audioUrl) {
-                    alert('Please enter a valid URL.');
-                    return;
-                }
-                console.log('Sending URL to AssemblyAI.');
-                await sendToAssemblyAI(audioUrl, apiKey);
+
+                console.log('Transcription initiated, polling for completion:', data);
+                statusDiv.innerHTML = 'Transcription started...';
+
+                // Poll for transcription completion
+                const transcriptId = data.id;
+                await pollTranscriptionStatus(apiKey, transcriptId, postId, statusDiv);
+
+            } catch (error) {
+                console.error('Error during transcription request:', error);
+                statusDiv.innerHTML = 'An error occurred during transcription.';
             }
         });
     }
 
-    // Function to upload the file to the server
-    async function uploadFileToServer(file) {
-        const formData = new FormData();
-        formData.append('audio_file', file);
-        formData.append('action', 'upload_audio_file'); // This tells WordPress which AJAX action to use
-
-        try {
-            const response = await fetch(assemblyai_settings.ajax_url, {
-                method: 'POST',
-                body: formData,
-            });
-            const result = await response.json();
-            if (result.success) {
-                console.log('File uploaded successfully:', result.file_url);
-                return result.file_url; // Return the file URL on the server
-            } else {
-                console.error('File upload failed:', result.message);
-                return null;
-            }
-        } catch (error) {
-            console.error('Error uploading file:', error);
-            return null;
-        }
-    }
-
-    // Function to send the audio file URL to AssemblyAI
-    async function sendToAssemblyAI(audioUrl, apiKey) {
-        try {
-            const params = {
-                audio_url: audioUrl,
-                speaker_labels: true,
-            };
-
-            // Send request to AssemblyAI to transcribe the file
-            const response = await fetch('https://api.assemblyai.com/v2/transcript', {
-                method: 'POST',
-                headers: {
-                    'authorization': apiKey,
-                    'content-type': 'application/json',
-                },
-                body: JSON.stringify(params),
-            });
-
-            const data = await response.json();
-            if (data.error) {
-                console.error(`Transcription request failed: ${data.error}`);
-                return;
-            }
-
-            console.log('Transcription initiated, polling for completion:', data);
-
-            // Poll for transcription completion
-            const transcriptId = data.id;
-            await pollTranscriptionStatus(apiKey, transcriptId);
-
-        } catch (error) {
-            console.error('Error sending request to AssemblyAI:', error);
-        }
-    }
-
-    // Polling function (same as before)
-    async function pollTranscriptionStatus(apiKey, transcriptId) {
+    // Polling function
+    async function pollTranscriptionStatus(apiKey, transcriptId, postId, statusDiv) {
         let transcriptionCompleted = false;
 
         while (!transcriptionCompleted) {
@@ -126,15 +69,46 @@ document.addEventListener('DOMContentLoaded', function() {
             if (pollData.status === 'completed') {
                 transcriptionCompleted = true;
                 console.log('Transcription completed:', pollData.text);
-                // Optionally save to WordPress
-                // saveTranscriptionToWordPress(pollData.text); // Commented out post-processing for now
+                statusDiv.innerHTML = 'Transcription completed. Appending to post content...';
+                
+                // Append the transcription to the post content
+                await appendTranscriptionToPost(pollData.text, postId);
+                statusDiv.innerHTML = 'Transcription appended to post content.';
             } else if (pollData.status === 'failed') {
                 console.error(`Transcription failed: ${pollData.error}`);
+                statusDiv.innerHTML = `Transcription failed: ${pollData.error}`;
                 transcriptionCompleted = true;
             } else {
                 console.log(`Transcription status: ${pollData.status}. Polling again in 5 seconds...`);
+                statusDiv.innerHTML = `Transcription status: ${pollData.status}. Polling again...`;
                 await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before polling again
             }
+        }
+    }
+
+    // Function to append transcription to the post content
+    async function appendTranscriptionToPost(transcriptionText, postId) {
+        try {
+            const response = await fetch(assemblyai_settings.ajax_url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    action: 'append_transcription_to_post',
+                    transcription: transcriptionText,
+                    post_id: postId
+                }),
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                console.log('Transcription appended to post successfully:', result);
+            } else {
+                console.error('Failed to append transcription to post:', result);
+            }
+        } catch (error) {
+            console.error('Error appending transcription to post:', error);
         }
     }
 });
