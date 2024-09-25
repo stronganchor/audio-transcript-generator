@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Poll for status until transcription is complete
                 const transcriptId = data.id;
-                pollTranscriptionStatus(apiKey, transcriptId, audioURL);
+                pollTranscriptionStatus(apiKey, transcriptId, audioUrl);
 
             } catch (error) {
                 console.error('Error during transcription request:', error);
