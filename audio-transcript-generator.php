@@ -3,7 +3,7 @@
 Plugin Name: AssemblyAI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API, now with enhanced error handling and dynamic post titles.
-Version: 1.6.1
+Version: 1.6.2
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -503,57 +503,34 @@ function process_transcription_with_gpt($transcription_text) {
 function whisper_audio_transcription_shortcode($atts) {
     ob_start();
     ?>
-    <button id="transcribeButton">Transcribe Hardcoded Audio</button>
+    <form id="transcriptionForm" method="post" enctype="multipart/form-data">
+        <h2>Choose how to submit your audio file for transcription</h2>
+        
+        <!-- Radio buttons to choose between file upload and URL input -->
+        <input type="radio" id="uploadOption" name="transcription_type" value="upload" checked>
+        <label for="uploadOption">Upload an audio file</label><br>
+        
+        <input type="radio" id="urlOption" name="transcription_type" value="url">
+        <label for="urlOption">Enter a URL to an audio file</label><br>
+        
+        <!-- File upload input -->
+        <div id="fileUploadSection">
+            <label for="audio_file">Choose audio file:</label>
+            <input type="file" id="audio_file" name="audio_file" accept="audio/*">
+        </div>
+
+        <!-- URL input -->
+        <div id="urlSection" style="display: none;">
+            <label for="audio_url">Enter URL:</label>
+            <input type="url" id="audio_url" name="audio_url" placeholder="https://example.com/audio.mp3">
+        </div>
+
+        <button type="button" id="transcribeButton">Transcribe</button>
+    </form>
     <?php
     return ob_get_clean();
 }
 add_shortcode('whisper_audio_transcription', 'whisper_audio_transcription_shortcode');
-
-
-/*function whisper_audio_transcription_shortcode($atts) {
-    ob_start();
-
-    if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_FILES['audio_file']) && $_FILES['audio_file']['error'] == UPLOAD_ERR_OK) {
-        $uploads_dir = wp_upload_dir();
-        $uploaded_file_path = $uploads_dir['path'] . '/' . basename($_FILES['audio_file']['name']);
-
-        if (move_uploaded_file($_FILES['audio_file']['tmp_name'], $uploaded_file_path)) {
-            // Create a custom post to store the transcription
-            $transcription_post_id = wp_insert_post([
-                'post_title' => 'Audio Transcription',
-                'post_content' => 'Your transcription is being processed...',
-                'post_status' => 'draft',
-                'post_author' => get_current_user_id(),
-                'post_type' => 'transcription',
-            ]);
-
-            // Enqueue the background task
-            global $assemblyai_transcription_process;
-            $assemblyai_transcription_process->push_to_queue([
-                'audio_path' => $uploaded_file_path,
-                'user_id' => get_current_user_id(),
-                'post_id' => $transcription_post_id,
-            ]);
-            $assemblyai_transcription_process->save()->dispatch();
-
-            echo '<p>Your transcription is being processed. Please check back later.</p>';
-            echo '<p><a href="' . get_permalink($transcription_post_id) . '">View Transcription</a></p>';
-        } else {
-            echo '<p>There was an error uploading the file.</p>';
-        }
-    } else {
-        ?>
-        <form method="post" enctype="multipart/form-data">
-            <h2>Upload an Audio File</h2>
-            <input type="file" name="audio_file" accept="audio/*" required>
-            <input type="submit" value="Transcribe">
-        </form>
-        <?php
-    }
-
-    return ob_get_clean();
-}
-add_shortcode('whisper_audio_transcription', 'whisper_audio_transcription_shortcode');*/
 
 // Register custom post type for transcriptions (unchanged)
 function whisper_register_transcription_post_type() {
