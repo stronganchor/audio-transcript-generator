@@ -46,7 +46,7 @@ class AssemblyAI_Transcription_Process extends WP_Background_Process {
 
         try {
             // Handle the transcription
-            $transcription = assemblyai_handle_audio_transcription($audioPath, $transcription_post_id, $error_response);
+            $transcription = handle_audio_transcription($audioPath, $transcription_post_id, $error_response);
 
             if ($transcription) {
                 // Send the transcription to OpenAI for post-processing
@@ -125,8 +125,8 @@ class AssemblyAI_Transcription_Process extends WP_Background_Process {
 $assemblyai_transcription_process = new AssemblyAI_Transcription_Process();
 
 // Function to handle audio transcription (used in background processing)
-function assemblyai_handle_audio_transcription($audioPath, $transcription_post_id, &$error_response = '') {
-    error_log("[" . date('Y-m-d H:i:s') . "] Starting assemblyai_handle_audio_transcription");
+function handle_audio_transcription($audioPath, $transcription_post_id, &$error_response = '') {
+    error_log("[" . date('Y-m-d H:i:s') . "] Starting handle_audio_transcription");
 
     // Check the file size
     $fileSize = filesize($audioPath);
