@@ -202,7 +202,7 @@ function save_processed_transcription_callback() {
 
                 if ($current_post) {
                     // Use wp_update_post and force the update to append content
-                    $new_content = $current_post->post_content . "\n\n" . '<h3>Processed Audio Transcript</h3>' . "\n" . $processed_transcription;
+                    $new_content = $current_post->post_content . "\n\n" . '<h3>Audio Transcript</h3>' . "\n" . $processed_transcription;
                     
                     // Prepare post data for updating (force updating, bypassing any potential post lock)
                     $updated_post = [
