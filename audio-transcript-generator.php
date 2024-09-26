@@ -176,7 +176,11 @@ add_action('wp_ajax_nopriv_save_processed_transcription', 'save_processed_transc
 function save_processed_transcription_callback() {
     try {
         if (isset($_POST['processed_transcription']) && isset($_POST['audio_url']) && isset($_POST['post_id'])) {
-            $processed_transcription = sanitize_text_field($_POST['processed_transcription']);
+            // Use sanitize_textarea_field to preserve line breaks
+            // Alternatively, use wp_kses_post to allow basic HTML
+            $processed_transcription = sanitize_textarea_field($_POST['processed_transcription']);
+            // $processed_transcription = wp_kses_post($_POST['processed_transcription']);
+            
             $audio_url = sanitize_text_field($_POST['audio_url']);
             $post_id = intval($_POST['post_id']); // Get the current post ID
             
@@ -198,7 +202,7 @@ function save_processed_transcription_callback() {
 
                 if ($current_post) {
                     // Use wp_update_post and force the update to append content
-                    $new_content = $current_post->post_content . "\n\n" . '<h3>Audio Transcript</h3>' . "\n" . $processed_transcription;
+                    $new_content = $current_post->post_content . "\n\n" . '<h3>Processed Audio Transcript</h3>' . "\n" . $processed_transcription;
                     
                     // Prepare post data for updating (force updating, bypassing any potential post lock)
                     $updated_post = [
