@@ -51,7 +51,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 console.log('Transcription initiated, polling for completion:', data);
-                statusDiv.innerHTML = `Transcription process initiated. Transcript ID: ${data.id}`;
+                statusDiv.innerHTML = `Transcription process initiated.  This may take a few minutes.  Please keep this window open.`;
 
                 // Poll for status until transcription is complete
                 const transcriptId = data.id;
@@ -84,7 +84,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 if (pollData.status === 'completed') {
                     transcriptionCompleted = true;
-                    statusDiv.innerHTML += `<br>Transcription completed. Starting post-processing...`;
+                    statusDiv.innerHTML += `<br>Transcription completed.`;
                     console.log('Transcription completed:', pollData.text);
 
                     // Start GPT post-processing
@@ -115,7 +115,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Function to process transcription with GPT-4o-mini (using OpenAI API)
     async function processTranscriptionWithGPT(transcriptionText, openaiApiKey, audioUrl, postId) {
         try {
-            statusDiv.innerHTML += `<br>Post-processing with GPT-4o-mini...`;
+            statusDiv.innerHTML += `<br>Sending transcript to OpenAI to edit punctuation and spelling...`;
 
             const messages = [
                 {
