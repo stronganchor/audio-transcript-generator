@@ -29,25 +29,23 @@ $myUpdateChecker->setBranch('main');
 // Add a meta box with the transcription shortcode to the post edit page
 function whisper_add_transcription_meta_box() {
     add_meta_box(
-        'transcription_meta_box', // Meta box ID
-        'Audio Transcription', // Title of the meta box
-        'whisper_render_transcription_meta_box', // Callback function
-        ['post', 'transcription', 'sermon', 'sermons', 'wpfc_sermon', 'podcast'], // Post types where the meta box should appear
-        'normal', // Context where the box should appear (normal, side, etc.)
-        'high' // Priority of the meta box
+        'transcription_meta_box',
+        'Audio Transcription',
+        'whisper_render_transcription_meta_box',
+        ['post', 'transcription', 'sermon', 'sermons', 'wpfc_sermon', 'podcast'],
+        'normal',
+        'high'
     );
 }
 add_action('add_meta_boxes', 'whisper_add_transcription_meta_box');
 
 // Render the transcription form meta box
 function whisper_render_transcription_meta_box($post) {
-    // Try to find an audio URL in the post content or metadata
     $audio_url = whisper_find_audio_url($post->ID);
     ?>
     <div id="transcriptionFormContainer">
         <h2>Enter a URL to an audio file for transcription</h2>
 
-        <!-- URL input, auto-populated if found -->
         <label for="audio_url">Enter URL:</label>
         <input type="url" id="audio_url" name="audio_url" placeholder="https://example.com/audio.mp3" value="<?php echo esc_attr($audio_url); ?>" required>
 
@@ -60,99 +58,71 @@ function whisper_render_transcription_meta_box($post) {
 
 // Helper function to find an audio URL in the post content or metadata
 function whisper_find_audio_url($post_id) {
-    // Retrieve the post content
     $post_content = get_post_field('post_content', $post_id);
 
-    // Define the regex pattern for matching audio URLs
     $audio_url_pattern = '/https?:\/\/[^\s"\'<>]+?\.(mp3|wav|ogg)/i';
 
-    // 1. Check for an audio URL in the post content
     if (preg_match($audio_url_pattern, $post_content, $matches)) {
-        return esc_url_raw($matches[0]); // Return the first matched URL
+        return esc_url_raw($matches[0]);
     }
 
-    // 2. Retrieve all metadata for the post
     $all_meta = get_post_meta($post_id);
-
-    // Iterate through each meta key and its associated values
     foreach ($all_meta as $meta_key => $meta_values) {
         foreach ($meta_values as $meta_value) {
-            // Ensure the meta value is a string before applying regex
             if (is_string($meta_value) && preg_match($audio_url_pattern, $meta_value, $matches)) {
-                return esc_url_raw($matches[0]); // Return the first matched URL
+                return esc_url_raw($matches[0]);
             }
         }
     }
-
-    // 3. If no audio URL is found, return an empty string
     return '';
 }
-
 
 // Function to render the transcription shortcode form below the title
 function whisper_transcription_admin_shortcode_after_title($content) {
     $screen = get_current_screen();
-    
-    // Only display on the transcription post list page
     if ($screen && $screen->post_type === 'transcription' && $screen->base === 'edit') {
-        // Build the form HTML
         $shortcode_output = '<div class="wrap">';
         $shortcode_output .= '<h2>Submit Audio for Transcription</h2>';
         $shortcode_output .= do_shortcode('[whisper_audio_transcription]');
         $shortcode_output .= '</div>';
 
-        // Add the form after the main title
         add_action('in_admin_header', function () use ($shortcode_output) {
             echo $shortcode_output;
         });
     }
 }
-
-// Hook into 'load-edit.php' to place the shortcode after the title on the transcription list page
 add_action('load-edit.php', 'whisper_transcription_admin_shortcode_after_title');
 
 // Handle transcription saving via AJAX
 add_action('wp_ajax_save_transcription', 'save_transcription_callback');
 add_action('wp_ajax_nopriv_save_transcription', 'save_transcription_callback');
-
 function save_transcription_callback() {
     try {
         if (isset($_POST['transcription']) && isset($_POST['audio_url']) && isset($_POST['post_id'])) {
             $transcription_text = sanitize_text_field($_POST['transcription']);
             $audio_url = sanitize_text_field($_POST['audio_url']);
-            $post_id = intval($_POST['post_id']); // Get the current post ID
-            
-            // Extract the file name from the audio URL
-            $audio_file_name = basename(parse_url($audio_url, PHP_URL_PATH)); // This will give you "example.mp3"
+            $post_id = intval($_POST['post_id']);
+            $audio_file_name = basename(parse_url($audio_url, PHP_URL_PATH));
 
-            // Insert the transcription as a new post without GPT processing
             $new_post_id = wp_insert_post([
-                'post_title' => $audio_file_name,  // Set the title as the audio file name
+                'post_title' => $audio_file_name,
                 'post_content' => $transcription_text,
                 'post_status' => 'publish',
                 'post_type' => 'transcription',
             ]);
 
-            // If the new transcription post is created, append the transcription to the current post
             if ($new_post_id) {
-                // Get the existing post content to append the transcription
                 $current_post = get_post($post_id);
-
                 if ($current_post) {
-                    // Use wp_update_post and force the update to append content
                     $new_content = $current_post->post_content . "\n\n" . '<h3>Audio Transcript</h3>' . "\n" . $transcription_text;
-                    
-                    // Prepare post data for updating (force updating, bypassing any potential post lock)
                     $updated_post = [
                         'ID' => $post_id,
                         'post_content' => $new_content,
                     ];
-                    
-                    // Use wp_update_post to save the changes (bypass the post lock)
-                    remove_action('wp_insert_post', 'wp_save_post_revision'); // Prevent revision creation
+                    remove_action('wp_insert_post', 'wp_save_post_revision');
                     wp_update_post($updated_post);
-                    add_action('wp_insert_post', 'wp_save_post_revision'); // Re-enable revision creation after updating
-                    
+                    add_action('wp_insert_post', 'wp_save_post_revision');
+
                     wp_send_json_success(['new_post_id' => $new_post_id, 'message' => 'Transcription post created and appended to the original post.']);
                 } else {
                     wp_send_json_error(['message' => 'Original post not found.']);
@@ -172,49 +142,33 @@ function save_transcription_callback() {
 // New AJAX handler to save processed transcription
 add_action('wp_ajax_save_processed_transcription', 'save_processed_transcription_callback');
 add_action('wp_ajax_nopriv_save_processed_transcription', 'save_processed_transcription_callback');
-
 function save_processed_transcription_callback() {
     try {
         if (isset($_POST['processed_transcription']) && isset($_POST['audio_url']) && isset($_POST['post_id'])) {
-            // Use sanitize_textarea_field to preserve line breaks
-            // Alternatively, use wp_kses_post to allow basic HTML
             $processed_transcription = sanitize_textarea_field($_POST['processed_transcription']);
-            // $processed_transcription = wp_kses_post($_POST['processed_transcription']);
-            
             $audio_url = sanitize_text_field($_POST['audio_url']);
-            $post_id = intval($_POST['post_id']); // Get the current post ID
-            
-            // Extract the file name from the audio URL
-            $audio_file_name = basename(parse_url($audio_url, PHP_URL_PATH)); // This will give you "example.mp3"
+            $post_id = intval($_POST['post_id']);
+            $audio_file_name = basename(parse_url($audio_url, PHP_URL_PATH));
 
-            // Insert the processed transcription as a new post
             $new_post_id = wp_insert_post([
-                'post_title' => $audio_file_name,  // Set the title as the audio file name
+                'post_title' => $audio_file_name,
                 'post_content' => $processed_transcription,
                 'post_status' => 'publish',
                 'post_type' => 'transcription',
             ]);
 
-            // If the new transcription post is created, append the processed transcription to the current post
             if ($new_post_id) {
-                // Get the existing post content to append the processed transcription
                 $current_post = get_post($post_id);
-
                 if ($current_post) {
-                    // Use wp_update_post and force the update to append content
                     $new_content = $current_post->post_content . "\n\n" . '<h3>Audio Transcript</h3>' . "\n" . $processed_transcription;
-                    
-                    // Prepare post data for updating (force updating, bypassing any potential post lock)
                     $updated_post = [
                         'ID' => $post_id,
                         'post_content' => $new_content,
                     ];
-                    
-                    // Use wp_update_post to save the changes (bypass the post lock)
-                    remove_action('wp_insert_post', 'wp_save_post_revision'); // Prevent revision creation
+                    remove_action('wp_insert_post', 'wp_save_post_revision');
                     wp_update_post($updated_post);
-                    add_action('wp_insert_post', 'wp_save_post_revision'); // Re-enable revision creation after updating
-                    
+                    add_action('wp_insert_post', 'wp_save_post_revision');
+
                     wp_send_json_success(['new_post_id' => $new_post_id, 'message' => 'Processed transcription post created and appended to the original post.']);
                 } else {
                     wp_send_json_error(['message' => 'Original post not found.']);
@@ -239,11 +193,10 @@ function enqueue_transcription_script() {
     // Enqueue the script for frontend and admin
     wp_enqueue_script('assemblyai-transcription', plugin_dir_url(__FILE__) . $relative_path, ['jquery'], $asset_version, true);
 
-    // Localize the script to pass in AJAX URL and API keys
+    // Localize without exposing OpenAI API key
     wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
         'ajax_url' => admin_url('admin-ajax.php'),
         'assemblyai_api_key' => get_option('assemblyai_api_key'),
-        'openai_api_key' => get_option('openai_api_key'), // Added OpenAI API Key
         'post_id' => get_the_ID(),
     ]);
 }
@@ -257,13 +210,11 @@ function whisper_audio_transcription_shortcode($atts) {
     <form id="transcriptionForm">
         <h2>Enter a URL to an audio file for transcription</h2>
         
-        <!-- URL input -->
         <label for="audio_url">Enter URL:</label>
         <input type="url" id="audio_url" name="audio_url" placeholder="https://example.com/audio.mp3" required>
 
         <button type="button" id="transcribeButton">Transcribe</button>
 
-        <!-- Status div -->
         <div id="transcriptionStatus" style="display:none; margin-top: 15px;">
             Starting transcription...
         </div>
@@ -331,4 +282,72 @@ function whisper_audio_transcription_setting_input_openai() {
 function whisper_audio_transcription_setting_input_assemblyai() {
     $api_key = get_option('assemblyai_api_key');
     echo "<input id='assemblyai_api_key' name='assemblyai_api_key' type='password' value='" . esc_attr($api_key) . "' />";
+}
+
+/**
+ * New AJAX handler to process transcription with GPT server-side.
+ * The OpenAI API key is never exposed to the browser.
+ */
+add_action('wp_ajax_process_openai_transcription', 'process_openai_transcription_callback');
+add_action('wp_ajax_nopriv_process_openai_transcription', 'process_openai_transcription_callback');
+function process_openai_transcription_callback() {
+    try {
+        // Must have the transcriptionText parameter.
+        if (empty($_POST['transcriptionText'])) {
+            wp_send_json_error(['message' => 'No transcription text provided']);
+        }
+
+        $transcriptionText = sanitize_textarea_field($_POST['transcriptionText']);
+        $openai_api_key = get_option('openai_api_key');
+        if (empty($openai_api_key)) {
+            wp_send_json_error(['message' => 'OpenAI API key not configured']);
+        }
+
+        // Build prompt (same logic from the old JS).
+        $messages = [
+            [
+                'role' => 'system',
+                'content' => 'You are an expert text editor specializing in correcting transcription errors.'
+            ],
+            [
+                'role' => 'user',
+                'content' => "Perform basic editing tasks on this speech transcript. Don't change wording, just update the punctuation and spelling and add paragraph breaks where necessary.\n\n{$transcriptionText}",
+            ],
+        ];
+
+        $postData = [
+            'model' => 'gpt-4o-mini',
+            'messages' => $messages,
+            'temperature' => 0.7,
+        ];
+
+        // Make the request to OpenAI from the server (not from the browser).
+        $response = wp_remote_post('https://api.openai.com/v1/chat/completions', [
+            'headers' => [
+                'Authorization' => 'Bearer ' . $openai_api_key,
+                'Content-Type'  => 'application/json',
+            ],
+            'body' => wp_json_encode($postData),
+            'timeout' => 30, // You can adjust if needed
+        ]);
+
+        if (is_wp_error($response)) {
+            wp_send_json_error(['message' => $response->get_error_message()]);
+        }
+
+        $decoded = json_decode(wp_remote_retrieve_body($response), true);
+
+        if (isset($decoded['error'])) {
+            wp_send_json_error(['message' => $decoded['error']['message']]);
+        }
+
+        if (!empty($decoded['choices'][0]['message']['content'])) {
+            $processedText = $decoded['choices'][0]['message']['content'];
+            wp_send_json_success(['processed_text' => $processedText]);
+        } else {
+            wp_send_json_error(['message' => 'Unexpected response from OpenAI']);
+        }
+    } catch (Exception $e) {
+        wp_send_json_error(['message' => 'OpenAI error: ' . $e->getMessage()]);
+    }
 }
