@@ -187,17 +187,35 @@ function save_processed_transcription_callback() {
 
 // Enqueue the script for frontend and admin
 function enqueue_transcription_script() {
+    // Path to our JS file
     $relative_path = 'js/assemblyai-transcription.js';
     $asset_version = filemtime(plugin_dir_path(__FILE__) . $relative_path);
 
-    // Enqueue the script for frontend and admin
-    wp_enqueue_script('assemblyai-transcription', plugin_dir_url(__FILE__) . $relative_path, ['jquery'], $asset_version, true);
+    // Enqueue script for frontend/admin
+    wp_enqueue_script(
+        'assemblyai-transcription',
+        plugin_dir_url(__FILE__) . $relative_path,
+        ['jquery'],
+        $asset_version,
+        true
+    );
 
-    // Localize without exposing OpenAI API key
+    // Default to empty if not admin
+    $assemblyai_api = '';
+    $openai_api     = '';
+
+    // Check if current user is admin
+    if (current_user_can('manage_options')) {
+        $assemblyai_api = get_option('assemblyai_api_key'); // from your plugin settings
+        $openai_api     = get_option('openai_api_key');     // from your plugin settings
+    }
+
+    // Localize script
     wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
-        'ajax_url' => admin_url('admin-ajax.php'),
-        'assemblyai_api_key' => get_option('assemblyai_api_key'),
-        'post_id' => get_the_ID(),
+        'ajax_url'           => admin_url('admin-ajax.php'),
+        'assemblyai_api_key' => $assemblyai_api,
+        'openai_api_key'     => $openai_api,
+        'post_id'            => get_the_ID(),
     ]);
 }
 add_action('wp_enqueue_scripts', 'enqueue_transcription_script');
@@ -285,8 +303,7 @@ function whisper_audio_transcription_setting_input_assemblyai() {
 }
 
 /**
- * New AJAX handler to process transcription with GPT server-side.
- * The OpenAI API key is never exposed to the browser.
+ * DEPRECATED: AJAX handler to process transcription with GPT server-side.
  */
 add_action('wp_ajax_process_openai_transcription', 'process_openai_transcription_callback');
 add_action('wp_ajax_nopriv_process_openai_transcription', 'process_openai_transcription_callback');
