@@ -333,7 +333,7 @@ function process_openai_transcription_callback() {
         ];
 
         $postData = [
-            'model' => 'gpt-o3-mini',
+            'model' => 'o3-mini',
             'messages' => $messages,
             'temperature' => 0.7,
         ];
