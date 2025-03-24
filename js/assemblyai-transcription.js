@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const audioUrl = document.querySelector('#audio_url').value; // URL from user input
             const assemblyApiKey = assemblyai_settings.assemblyai_api_key;
-            const openaiApiKey = assemblyai_settings.openai_api_key; // OpenAI API Key
+            const anthropicApiKey = assemblyai_settings.anthropic_api_key; 
             const postId = assemblyai_settings.post_id; // Get the current post ID
 
             if (!audioUrl) {
@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Poll for status until transcription is complete
                 const transcriptId = data.id;
-                pollTranscriptionStatus(assemblyApiKey, transcriptId, audioUrl, postId, openaiApiKey);
+                pollTranscriptionStatus(assemblyApiKey, transcriptId, audioUrl, postId, anthropicApiKey);
 
             } catch (error) {
                 console.error('Error during transcription request:', error);
@@ -67,7 +67,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Polling function for transcription status
-    async function pollTranscriptionStatus(apiKey, transcriptId, audioUrl, postId, openaiApiKey) {
+    async function pollTranscriptionStatus(apiKey, transcriptId, audioUrl, postId, anthropicApiKey) {
         let transcriptionCompleted = false;
     
         while (!transcriptionCompleted) {
@@ -87,8 +87,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     statusDiv.innerHTML += `<br>Transcription completed.`;
                     console.log('Transcription completed:', pollData.text);
 
-                    // Start GPT post-processing
-                    await processTranscriptionWithGPT(pollData.text, openaiApiKey, audioUrl, postId);
+                    // Start post-processing
+                    await processTranscriptionWithAnthropic(pollData.text, anthropicApiKey, audioUrl, postId);
                 } else if (pollData.status === 'failed') {
                     console.error(`Transcription failed: ${pollData.error}`);
                     statusDiv.innerHTML = `Transcription failed: ${pollData.error}`;
@@ -112,67 +112,61 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Function to process transcription with GPT-4o-mini (using OpenAI API)
-    async function processTranscriptionWithGPT(transcriptionText, openaiApiKey, audioUrl, postId) {
+    // Function to post-process transcription with AI
+    async function processTranscriptionWithAnthropic(transcriptionText, anthropicApiKey, audioUrl, postId) {
         try {
-            statusDiv.innerHTML += `<br>Sending transcript to OpenAI to edit punctuation and spelling...`;
-
-            const messages = [
-                {
-                    'role': 'system',
-                    'content': 'You are an expert text editor specializing in correcting transcription errors.'
-                },
-                {
-                    'role': 'user',
-                    'content': `Perform basic editing tasks on this speech transcript. Don't change wording, just update the punctuation and spelling and add paragraph breaks where necessary.\n\n${transcriptionText}`,
-                },
-            ];
-
+            statusDiv.innerHTML += `<br>Sending transcript to Anthropic Claude to edit punctuation and spelling...`;
+            
+            // Using the current messages API format
             const postData = {
-                'model': 'gpt-4o-mini',
-                'messages': messages,
-                'temperature': 0.7,
+                model: "claude-3-haiku-20240307", // Use specific model version instead of "latest"
+                max_tokens: 100000, // Set high limit for large transcriptions
+                messages: [
+                    {
+                        role: "user",
+                        content: "You are an expert text editor specializing in correcting transcription errors. Please perform basic editing tasks on this speech transcript. Don't change wording, just update punctuation and spelling and add paragraph breaks where necessary.\n\nTranscript:\n" + transcriptionText
+                    }
+                ],
+                temperature: 0.2
             };
-
-            const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${openaiApiKey}`,
                     'Content-Type': 'application/json',
+                    'x-api-key': anthropicApiKey, 
+                    'anthropic-version': '2023-06-01' // Required API version header
                 },
                 body: JSON.stringify(postData),
             });
-
+    
             const data = await response.json();
-
+    
             if (data.error) {
-                console.error(`OpenAI API error: ${data.error.message}`);
-                statusDiv.innerHTML += `<br>Post-processing failed: ${data.error.message}`;
-                // Re-enable input and button
+                console.error(`Anthropic API error: ${data.error.message || data.error}`);
+                statusDiv.innerHTML += `<br>Post-processing failed: ${data.error.message || data.error}`;
                 transcriptionButton.disabled = false;
                 document.querySelector('#audio_url').disabled = false;
                 return;
             }
-
-            if (data.choices && data.choices[0].message.content) {
-                const processedText = data.choices[0].message.content;
+    
+            if (data.content && data.content.length > 0) {
+                const processedText = data.content[0].text;
                 statusDiv.innerHTML += `<br>Post-processing completed. Saving transcription...`;
                 console.log('Post-processed transcription:', processedText);
-
+    
                 // Save the processed transcription to WordPress
                 await saveProcessedTranscription(processedText, audioUrl, postId);
             } else {
-                console.error('Unexpected OpenAI API response:', data);
+                console.error('Unexpected Anthropic API response:', data);
                 statusDiv.innerHTML += `<br>Unexpected response from post-processing.`;
-                // Re-enable input and button
                 transcriptionButton.disabled = false;
                 document.querySelector('#audio_url').disabled = false;
             }
-
+    
         } catch (error) {
-            console.error('Error during GPT post-processing:', error);
+            console.error('Error during Anthropic post-processing:', error);
             statusDiv.innerHTML += `<br>Error during post-processing: ${error}`;
-            // Re-enable input and button
             transcriptionButton.disabled = false;
             document.querySelector('#audio_url').disabled = false;
         }
