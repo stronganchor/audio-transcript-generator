@@ -1,19 +1,17 @@
 document.addEventListener('DOMContentLoaded', function() { 
     const transcriptionButton = document.querySelector('#transcribeButton');
-    const statusDiv = document.querySelector('#transcriptionStatus'); // Reference to the status div
-    const transcriptionContainer = document.querySelector('#transcriptionResult'); // Container for transcription result
+    const statusDiv = document.querySelector('#transcriptionStatus');
+    const transcriptionContainer = document.querySelector('#transcriptionResult');
     
     if (transcriptionButton) {
         transcriptionButton.addEventListener('click', async function() {
-            // Reset the status div and transcription container
             statusDiv.style.display = 'block';
             statusDiv.innerHTML = 'Starting transcription...';
-            transcriptionContainer.innerHTML = ''; // Clear previous transcription
+            transcriptionContainer.innerHTML = '';
 
-            const audioUrl = document.querySelector('#audio_url').value; // URL from user input
+            const audioUrl = document.querySelector('#audio_url').value;
             const assemblyApiKey = assemblyai_settings.assemblyai_api_key;
-            const anthropicApiKey = assemblyai_settings.anthropic_api_key; 
-            const postId = assemblyai_settings.post_id; // Get the current post ID
+            const postId = assemblyai_settings.post_id;
 
             if (!audioUrl) {
                 alert('Please enter a valid URL.');
@@ -21,7 +19,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            // Disable input and button
             transcriptionButton.disabled = true;
             document.querySelector('#audio_url').disabled = true;
 
@@ -31,7 +28,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     speaker_labels: true,
                 };
 
-                // Send request to start transcription
                 const response = await fetch('https://api.assemblyai.com/v2/transcript', {
                     method: 'POST',
                     headers: {
@@ -44,30 +40,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 const data = await response.json();
 
                 if (data.error) {
-                    transcriptionButton.disabled = false;  // Enable the button again
-                    document.querySelector('#audio_url').disabled = false;  // Enable input
+                    transcriptionButton.disabled = false;
+                    document.querySelector('#audio_url').disabled = false;
                     statusDiv.innerHTML = `Transcription request failed: ${data.error}`;
                     return;
                 }
 
                 console.log('Transcription initiated, polling for completion:', data);
-                statusDiv.innerHTML = `Transcription process initiated.  This may take a few minutes.  Please keep this window open.`;
+                statusDiv.innerHTML = `Transcription process initiated. This may take a few minutes. Please keep this window open.`;
 
-                // Poll for status until transcription is complete
                 const transcriptId = data.id;
-                pollTranscriptionStatus(assemblyApiKey, transcriptId, audioUrl, postId, anthropicApiKey);
+                pollTranscriptionStatus(assemblyApiKey, transcriptId, audioUrl, postId);
 
             } catch (error) {
                 console.error('Error during transcription request:', error);
-                transcriptionButton.disabled = false;  // Enable the button again
-                document.querySelector('#audio_url').disabled = false;  // Enable input
+                transcriptionButton.disabled = false;
+                document.querySelector('#audio_url').disabled = false;
                 statusDiv.innerHTML = `An error occurred during transcription: ${error}`;
             }
         });
     }
 
-    // Polling function for transcription status
-    async function pollTranscriptionStatus(apiKey, transcriptId, audioUrl, postId, anthropicApiKey) {
+    async function pollTranscriptionStatus(apiKey, transcriptId, audioUrl, postId) {
         let transcriptionCompleted = false;
     
         while (!transcriptionCompleted) {
@@ -86,94 +80,29 @@ document.addEventListener('DOMContentLoaded', function() {
                     transcriptionCompleted = true;
                     statusDiv.innerHTML += `<br>Transcription completed.`;
                     console.log('Transcription completed:', pollData.text);
-
-                    // Start post-processing
-                    await processTranscriptionWithAnthropic(pollData.text, anthropicApiKey, audioUrl, postId);
+                    await saveTranscription(pollData.text, audioUrl, postId);
                 } else if (pollData.status === 'failed') {
                     console.error(`Transcription failed: ${pollData.error}`);
                     statusDiv.innerHTML = `Transcription failed: ${pollData.error}`;
                     transcriptionCompleted = true;
-                    // Re-enable input and button
                     transcriptionButton.disabled = false;
                     document.querySelector('#audio_url').disabled = false;
                 } else {
                     console.log(`Transcription status: ${pollData.status}. Checking again in 5 seconds...`);
                     statusDiv.innerHTML = `${statusDiv.innerHTML}<br>Status: ${pollData.status}. Checking again...`;
-                    await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before polling again
+                    await new Promise(resolve => setTimeout(resolve, 5000));
                 }
             } catch (error) {
                 console.error('Error while polling transcription status:', error);
                 statusDiv.innerHTML = `Error while polling transcription status: ${error}`;
                 transcriptionCompleted = true;
-                // Re-enable input and button
                 transcriptionButton.disabled = false;
                 document.querySelector('#audio_url').disabled = false;
             }
         }
     }
 
-    // Function to post-process transcription with AI
-    async function processTranscriptionWithAnthropic(transcriptionText, anthropicApiKey, audioUrl, postId) {
-        try {
-            statusDiv.innerHTML += `<br>Sending transcript to Anthropic Claude to edit punctuation and spelling...`;
-            
-            // Using the current messages API format
-            const postData = {
-                model: "claude-3-haiku-20240307", // Use specific model version instead of "latest"
-                max_tokens: 100000, // Set high limit for large transcriptions
-                messages: [
-                    {
-                        role: "user",
-                        content: "You are an expert text editor specializing in correcting transcription errors. Please perform basic editing tasks on this speech transcript. Don't change wording, just update punctuation and spelling and add paragraph breaks where necessary.\n\nTranscript:\n" + transcriptionText
-                    }
-                ],
-                temperature: 0.2
-            };
-    
-            const response = await fetch('https://api.anthropic.com/v1/messages', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-api-key': anthropicApiKey, 
-                    'anthropic-version': '2023-06-01' // Required API version header
-                },
-                body: JSON.stringify(postData),
-            });
-    
-            const data = await response.json();
-    
-            if (data.error) {
-                console.error(`Anthropic API error: ${data.error.message || data.error}`);
-                statusDiv.innerHTML += `<br>Post-processing failed: ${data.error.message || data.error}`;
-                transcriptionButton.disabled = false;
-                document.querySelector('#audio_url').disabled = false;
-                return;
-            }
-    
-            if (data.content && data.content.length > 0) {
-                const processedText = data.content[0].text;
-                statusDiv.innerHTML += `<br>Post-processing completed. Saving transcription...`;
-                console.log('Post-processed transcription:', processedText);
-    
-                // Save the processed transcription to WordPress
-                await saveProcessedTranscription(processedText, audioUrl, postId);
-            } else {
-                console.error('Unexpected Anthropic API response:', data);
-                statusDiv.innerHTML += `<br>Unexpected response from post-processing.`;
-                transcriptionButton.disabled = false;
-                document.querySelector('#audio_url').disabled = false;
-            }
-    
-        } catch (error) {
-            console.error('Error during Anthropic post-processing:', error);
-            statusDiv.innerHTML += `<br>Error during post-processing: ${error}`;
-            transcriptionButton.disabled = false;
-            document.querySelector('#audio_url').disabled = false;
-        }
-    }
-
-    // Function to save processed transcription to WordPress and append to current post content
-    async function saveProcessedTranscription(processedText, audioUrl, postId) {
+    async function saveTranscription(transcriptionText, audioUrl, postId) {
         try {
             const response = await fetch(assemblyai_settings.ajax_url, {
                 method: 'POST',
@@ -181,32 +110,29 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Content-Type': 'application/x-www-form-urlencoded',
                 },
                 body: new URLSearchParams({
-                    action: 'save_processed_transcription',
-                    processed_transcription: processedText,
+                    action: 'save_transcription',
+                    transcription: transcriptionText,
                     audio_url: audioUrl,
-                    post_id: postId // Pass the post ID for appending
+                    post_id: postId
                 }),
             });
         
             const result = await response.json();
             if (result.success) {
-                console.log('Processed transcription saved and appended to post:', result);
-                statusDiv.innerHTML += `<br>Processed transcription saved successfully! Refreshing the page...`;
-                // Refresh the page after a short delay to show the updated content
+                console.log('Transcription saved and appended to post:', result);
+                statusDiv.innerHTML += `<br>Transcription saved successfully! Refreshing the page...`;
                 setTimeout(() => {
                     location.reload();
-                }, 3000); // 3-second delay
+                }, 3000);
             } else {
-                console.error('Failed to save processed transcription:', result);
-                statusDiv.innerHTML += `<br>Failed to save processed transcription: ${result.data || 'Unknown error'}`;
-                // Re-enable input and button
+                console.error('Failed to save transcription:', result);
+                statusDiv.innerHTML += `<br>Failed to save transcription: ${result.data || 'Unknown error'}`;
                 transcriptionButton.disabled = false;
                 document.querySelector('#audio_url').disabled = false;
             }
         } catch (error) {
-            console.error('Error while saving processed transcription to WordPress:', error);
-            statusDiv.innerHTML += `<br>Error while saving processed transcription: ${error}`;
-            // Re-enable input and button
+            console.error('Error while saving transcription to WordPress:', error);
+            statusDiv.innerHTML += `<br>Error while saving transcription: ${error}`;
             transcriptionButton.disabled = false;
             document.querySelector('#audio_url').disabled = false;
         }  
