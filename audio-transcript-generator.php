@@ -2,8 +2,8 @@
 /*
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
-Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field, with GPT-4o-mini post-processing.
-Version: 1.9.7
+Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field, with Anthropic Claude post-processing.
+Version: 1.9.8
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -202,19 +202,19 @@ function enqueue_transcription_script() {
 
     // Default to empty if not admin
     $assemblyai_api = '';
-    $openai_api     = '';
+    $anthropic_api  = '';
 
     // Check if current user is admin
     if (current_user_can('manage_options')) {
         $assemblyai_api = get_option('assemblyai_api_key'); // from your plugin settings
-        $openai_api     = get_option('openai_api_key');     // from your plugin settings
+        $anthropic_api  = get_option('anthropic_api_key');  // from your plugin settings
     }
 
     // Localize script
     wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
         'ajax_url'           => admin_url('admin-ajax.php'),
         'assemblyai_api_key' => $assemblyai_api,
-        'openai_api_key'     => $openai_api,
+        'anthropic_api_key'  => $anthropic_api,
         'post_id'            => get_the_ID(),
     ]);
 }
@@ -278,12 +278,12 @@ function whisper_audio_transcription_settings_page() {
 
 // Register and define the settings
 function whisper_audio_transcription_settings_init() {
-    register_setting('whisper_audio_transcription_options_group', 'openai_api_key');
+    register_setting('whisper_audio_transcription_options_group', 'anthropic_api_key');
     register_setting('whisper_audio_transcription_options_group', 'assemblyai_api_key');
 
     add_settings_section('whisper_audio_transcription_main_section', 'Main Settings', 'whisper_audio_transcription_section_text', 'whisper_audio_transcription');
 
-    add_settings_field('openai_api_key', 'OpenAI API Key', 'whisper_audio_transcription_setting_input_openai', 'whisper_audio_transcription', 'whisper_audio_transcription_main_section');
+    add_settings_field('anthropic_api_key', 'Anthropic API Key', 'whisper_audio_transcription_setting_input_anthropic', 'whisper_audio_transcription', 'whisper_audio_transcription_main_section');
     add_settings_field('assemblyai_api_key', 'AssemblyAI API Key', 'whisper_audio_transcription_setting_input_assemblyai', 'whisper_audio_transcription', 'whisper_audio_transcription_main_section');
 }
 add_action('admin_init', 'whisper_audio_transcription_settings_init');
@@ -292,9 +292,9 @@ function whisper_audio_transcription_section_text() {
     echo '<p>Enter your API keys here.</p>';
 }
 
-function whisper_audio_transcription_setting_input_openai() {
-    $api_key = get_option('openai_api_key');
-    echo "<input id='openai_api_key' name='openai_api_key' type='password' value='" . esc_attr($api_key) . "' />";
+function whisper_audio_transcription_setting_input_anthropic() {
+    $api_key = get_option('anthropic_api_key');
+    echo "<input id='anthropic_api_key' name='anthropic_api_key' type='password' value='" . esc_attr($api_key) . "' />";
 }
 
 function whisper_audio_transcription_setting_input_assemblyai() {
@@ -303,11 +303,11 @@ function whisper_audio_transcription_setting_input_assemblyai() {
 }
 
 /**
- * DEPRECATED: AJAX handler to process transcription with GPT server-side.
+ * DEPRECATED: AJAX handler to process transcription with Anthropic Claude server-side.
  */
-add_action('wp_ajax_process_openai_transcription', 'process_openai_transcription_callback');
-add_action('wp_ajax_nopriv_process_openai_transcription', 'process_openai_transcription_callback');
-function process_openai_transcription_callback() {
+add_action('wp_ajax_process_anthropic_transcription', 'process_anthropic_transcription_callback');
+add_action('wp_ajax_nopriv_process_anthropic_transcription', 'process_anthropic_transcription_callback');
+function process_anthropic_transcription_callback() {
     try {
         // Must have the transcriptionText parameter.
         if (empty($_POST['transcriptionText'])) {
@@ -315,34 +315,30 @@ function process_openai_transcription_callback() {
         }
 
         $transcriptionText = sanitize_textarea_field($_POST['transcriptionText']);
-        $openai_api_key = get_option('openai_api_key');
-        if (empty($openai_api_key)) {
-            wp_send_json_error(['message' => 'OpenAI API key not configured']);
+        $anthropic_api_key = get_option('anthropic_api_key');
+        if (empty($anthropic_api_key)) {
+            wp_send_json_error(['message' => 'Anthropic API key not configured']);
         }
 
-        // Build prompt (same logic from the old JS).
-        $messages = [
-            [
-                'role' => 'system',
-                'content' => 'You are an expert text editor specializing in correcting transcription errors.'
-            ],
-            [
-                'role' => 'user',
-                'content' => "Perform basic editing tasks on this speech transcript. Don't change wording, just update the punctuation and spelling and add paragraph breaks where necessary.\n\n{$transcriptionText}",
-            ],
-        ];
-
+        // Build messages for the Anthropic API
         $postData = [
-            'model' => 'o3-mini',
-            'messages' => $messages,
-            'temperature' => 0.7,
+            'model' => 'claude-3-haiku-20240307',
+            'max_tokens' => 200000,
+            'messages' => [
+                [
+                    'role' => 'user',
+                    'content' => "You are an expert text editor specializing in correcting transcription errors. Please perform basic editing tasks on this speech transcript. Don't change wording, just update punctuation and spelling and add paragraph breaks where necessary.\n\nTranscript:\n" . $transcriptionText
+                ]
+            ],
+            'temperature' => 0.0,
         ];
 
-        // Make the request to OpenAI from the server (not from the browser).
-        $response = wp_remote_post('https://api.openai.com/v1/chat/completions', [
+        // Make the request to Anthropic from the server
+        $response = wp_remote_post('https://api.anthropic.com/v1/messages', [
             'headers' => [
-                'Authorization' => 'Bearer ' . $openai_api_key,
-                'Content-Type'  => 'application/json',
+                'x-api-key' => $anthropic_api_key,
+                'anthropic-version' => '2023-06-01',
+                'Content-Type' => 'application/json',
             ],
             'body' => wp_json_encode($postData),
             'timeout' => 300,
@@ -358,13 +354,13 @@ function process_openai_transcription_callback() {
             wp_send_json_error(['message' => $decoded['error']['message']]);
         }
 
-        if (!empty($decoded['choices'][0]['message']['content'])) {
-            $processedText = $decoded['choices'][0]['message']['content'];
+        if (!empty($decoded['content']) && is_array($decoded['content']) && !empty($decoded['content'][0]['text'])) {
+            $processedText = $decoded['content'][0]['text'];
             wp_send_json_success(['processed_text' => $processedText]);
         } else {
-            wp_send_json_error(['message' => 'Unexpected response from OpenAI']);
+            wp_send_json_error(['message' => 'Unexpected response from Anthropic']);
         }
     } catch (Exception $e) {
-        wp_send_json_error(['message' => 'OpenAI error: ' . $e->getMessage()]);
+        wp_send_json_error(['message' => 'Anthropic error: ' . $e->getMessage()]);
     }
 }
