@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field.
-Version: 1.9.9
+Version: 2.0.0
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
