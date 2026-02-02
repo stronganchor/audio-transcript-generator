@@ -1,0 +1,49 @@
+.whisper-admin-page .whisper-audio-url {
+    display: inline-block;
+    max-width: 420px;
+    word-break: break-all;
+    white-space: normal;
+}
+
+.whisper-admin-page .whisper-status {
+    min-width: 260px;
+}
+
+.whisper-admin-page .whisper-status-text {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.whisper-admin-page .whisper-status-meta {
+    color: #50575e;
+    font-size: 12px;
+    margin-bottom: 6px;
+}
+
+.whisper-admin-page .whisper-status-links {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.whisper-admin-page .whisper-progress {
+    height: 8px;
+    background: #e5e5e5;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.whisper-admin-page .whisper-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: #2271b1;
+    transition: width 0.35s ease;
+}
+
+.whisper-admin-page .whisper-row-active {
+    background: #fff8e5;
+}
+
+.whisper-admin-page .whisper-admin-actions {
+    white-space: nowrap;
+}

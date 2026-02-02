@@ -22,7 +22,16 @@ document.addEventListener('DOMContentLoaded', function() {
             transcriptionButton.disabled = true;
             document.querySelector('#audio_url').disabled = true;
 
+            let lockAcquired = false;
             try {
+                lockAcquired = await acquireLock(postId);
+                if (!lockAcquired) {
+                    transcriptionButton.disabled = false;
+                    document.querySelector('#audio_url').disabled = false;
+                    statusDiv.innerHTML = 'Another transcription is already running.';
+                    return;
+                }
+
                 const params = {
                     audio_url: audioUrl,
                     speaker_labels: true,
@@ -52,13 +61,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 statusDiv.innerHTML = `Transcription process initiated. This may take a few minutes. Please keep this window open.`;
 
                 const transcriptId = data.id;
-                pollTranscriptionStatus(assemblyApiKey, transcriptId, audioUrl, postId);
+                await pollTranscriptionStatus(assemblyApiKey, transcriptId, audioUrl, postId);
 
             } catch (error) {
                 console.error('Error during transcription request:', error);
                 transcriptionButton.disabled = false;
                 document.querySelector('#audio_url').disabled = false;
                 statusDiv.innerHTML = `An error occurred during transcription: ${error}`;
+            } finally {
+                if (lockAcquired) {
+                    await releaseLock();
+                }
             }
         });
     }
@@ -170,5 +183,45 @@ document.addEventListener('DOMContentLoaded', function() {
             return null;
         }
         return paragraphs.join('\n\n');
+    }
+
+    async function acquireLock(postId) {
+        if (!assemblyai_settings.lock_nonce) {
+            return true;
+        }
+        const response = await fetch(assemblyai_settings.ajax_url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                action: 'whisper_acquire_transcription_lock',
+                post_id: postId,
+                nonce: assemblyai_settings.lock_nonce,
+            }),
+        });
+
+        const result = await response.json();
+        return !!result.success;
+    }
+
+    async function releaseLock() {
+        if (!assemblyai_settings.lock_nonce) {
+            return;
+        }
+        try {
+            await fetch(assemblyai_settings.ajax_url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    action: 'whisper_release_transcription_lock',
+                    nonce: assemblyai_settings.lock_nonce,
+                }),
+            });
+        } catch (error) {
+            console.error('Failed to release transcription lock:', error);
+        }
     }
 });
