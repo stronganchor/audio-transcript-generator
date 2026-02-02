@@ -7,6 +7,7 @@ A WordPress plugin that submits an audio file URL to AssemblyAI for transcriptio
 - Prefills the audio URL by scanning post content and post meta for mp3/wav/ogg links.
 - Creates a "Transcriptions" custom post type for saved transcripts.
 - Appends the transcript to the original post content.
+- Optional background batch mode that auto-transcribes one eligible post per cron run.
 - Speaker labels enabled by default.
 - GitHub-based update checking via the bundled plugin update checker.
 
@@ -22,7 +23,14 @@ A WordPress plugin that submits an audio file URL to AssemblyAI for transcriptio
 ## Configuration
 1. In WordPress admin, go to Settings -> Audio Transcription.
 2. Enter your AssemblyAI API key and save.
-3. The API key is stored in the WordPress options table as `assemblyai_api_key`.
+3. (Optional) Enable "Automatic Background Transcription" and choose a frequency.
+4. (Optional) Use "Run Batch Now" to execute one background cycle immediately.
+5. The API key is stored in the WordPress options table as `assemblyai_api_key`.
+
+Background batch notes:
+- It processes the most recent eligible post that has an audio URL and is not already transcribed.
+- It skips posts detected as likely legacy transcriptions.
+- It checks one in-progress AssemblyAI job per run, and starts a new one when none is in progress.
 
 Note: The API key is only injected into pages for users with the `manage_options` capability. Non-admin users will not be able to start transcriptions from the UI without code changes.
 
@@ -61,10 +69,16 @@ This renders the same URL input and "Transcribe" button on the front end. The AP
    - `POST admin-ajax.php?action=save_transcription`
 4. WordPress creates a new `transcription` post and appends the text to the original post content.
 
+Optional background mode:
+1. WordPress cron selects the most recent eligible post.
+2. It submits the audio URL to AssemblyAI and stores the transcript ID.
+3. On later cron runs, it checks status and saves the transcript when complete.
+
 ## Data storage
 - Transcripts are saved as plain text (sanitized) in WordPress post content.
 - A new `transcription` post is created with the audio file name as the title.
 - The transcript is appended to the original post body with an "Audio Transcript" heading.
+- Background mode state is tracked in `whisper_background_batch_state`.
 
 ## APIs and services used
 - AssemblyAI Transcript API (client-side requests from the browser).
@@ -84,6 +98,3 @@ This renders the same URL input and "Transcribe" button on the front end. The AP
 - "Transcription request failed": check your AssemblyAI API key and account status.
 - No transcript appears: confirm your audio URL is reachable and ends with `.mp3`, `.wav`, or `.ogg`.
 - Shortcode works only for admins by default: the API key is not injected for non-admin users.
-
-## Repository notes
-This repository also contains `audio-transcript-generator.py` and `run-audio-transcript-generator.cmd`, which are separate utilities and are not used by the WordPress plugin code.
