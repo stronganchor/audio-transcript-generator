@@ -25,12 +25,14 @@ A WordPress plugin that submits an audio file URL to AssemblyAI for transcriptio
 2. Enter your AssemblyAI API key and save.
 3. (Optional) Enable "Automatic Background Transcription" and choose a frequency.
 4. (Optional) Use "Run Batch Now" to execute one background cycle immediately.
-5. The API key is stored in the WordPress options table as `assemblyai_api_key`.
+5. Use "Cancel Background Batch" if a background run appears stalled.
+6. The API key is stored in the WordPress options table as `assemblyai_api_key`.
 
 Background batch notes:
 - It processes the most recent eligible post that has an audio URL and is not already transcribed.
 - It skips posts detected as likely legacy transcriptions.
-- It checks one in-progress AssemblyAI job per run, and starts a new one when none is in progress.
+- It starts one new AssemblyAI job, then performs frequent follow-up checks while that job is in progress.
+- Manual kickoffs are disabled while another transcription process is active.
 
 Note: The API key is only injected into pages for users with the `manage_options` capability. Non-admin users will not be able to start transcriptions from the UI without code changes.
 

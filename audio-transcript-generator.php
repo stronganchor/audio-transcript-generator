@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field.
-Version: 2.0.4
+Version: 2.0.5
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -91,6 +91,10 @@ function whisper_get_background_batch_hook_name() {
     return 'whisper_background_batch_tick';
 }
 
+function whisper_get_background_batch_followup_hook_name() {
+    return 'whisper_background_batch_followup_tick';
+}
+
 function whisper_get_background_batch_frequency_options() {
     return [
         'whisper_every_5_minutes'  => 'Every 5 minutes',
@@ -141,16 +145,122 @@ function whisper_get_background_batch_state() {
     return is_array($state) ? $state : [];
 }
 
+function whisper_background_batch_is_running($state = null) {
+    if (!is_array($state)) {
+        $state = whisper_get_background_batch_state();
+    }
+
+    return !empty($state['post_id']) && !empty($state['transcript_id']);
+}
+
+function whisper_schedule_background_batch_followup_tick($delay_seconds = 60) {
+    $hook_name = whisper_get_background_batch_followup_hook_name();
+    if (wp_next_scheduled($hook_name)) {
+        return;
+    }
+
+    $delay_seconds = max(5, intval($delay_seconds));
+    wp_schedule_single_event(time() + $delay_seconds, $hook_name);
+}
+
+function whisper_clear_background_batch_followup_tick() {
+    wp_clear_scheduled_hook(whisper_get_background_batch_followup_hook_name());
+}
+
 function whisper_set_background_batch_state($state) {
     update_option('whisper_background_batch_state', $state, false);
+    if (whisper_background_batch_is_running($state)) {
+        whisper_schedule_background_batch_followup_tick(60);
+    }
 }
 
 function whisper_clear_background_batch_state() {
     delete_option('whisper_background_batch_state');
+    whisper_clear_background_batch_followup_tick();
 }
 
 function whisper_get_assemblyai_api_key() {
     return trim((string) get_option('assemblyai_api_key', ''));
+}
+
+function whisper_get_site_datetime_format() {
+    return get_option('date_format') . ' ' . get_option('time_format');
+}
+
+function whisper_format_unix_timestamp_for_display($timestamp) {
+    $timestamp = intval($timestamp);
+    if ($timestamp <= 0) {
+        return '';
+    }
+
+    return wp_date(whisper_get_site_datetime_format(), $timestamp, wp_timezone());
+}
+
+function whisper_format_mysql_datetime_for_display($datetime_string) {
+    $datetime_string = trim((string) $datetime_string);
+    if ($datetime_string === '') {
+        return '';
+    }
+
+    $timezone = wp_timezone();
+    $datetime = date_create_immutable_from_format('Y-m-d H:i:s', $datetime_string, $timezone);
+    if ($datetime instanceof DateTimeImmutable) {
+        return wp_date(whisper_get_site_datetime_format(), $datetime->getTimestamp(), $timezone);
+    }
+
+    $timestamp = strtotime($datetime_string);
+    if (!$timestamp) {
+        return '';
+    }
+
+    return whisper_format_unix_timestamp_for_display($timestamp);
+}
+
+function whisper_get_elapsed_time_label($started_at) {
+    $started_at = intval($started_at);
+    if ($started_at <= 0 || $started_at > time()) {
+        return '';
+    }
+
+    return human_time_diff($started_at, time());
+}
+
+function whisper_get_background_batch_status_label($status) {
+    $status = sanitize_key((string) $status);
+    if ($status === '') {
+        return 'Processing';
+    }
+
+    return ucwords(str_replace('_', ' ', $status));
+}
+
+function whisper_get_background_batch_state_details($state = null) {
+    if (!is_array($state)) {
+        $state = whisper_get_background_batch_state();
+    }
+
+    if (!whisper_background_batch_is_running($state)) {
+        return null;
+    }
+
+    $post_id = intval($state['post_id']);
+    $post = $post_id ? get_post($post_id) : null;
+    $started_at = !empty($state['started_at']) ? intval($state['started_at']) : 0;
+    $last_checked = !empty($state['last_checked']) ? intval($state['last_checked']) : 0;
+    $status = !empty($state['status']) ? sanitize_key((string) $state['status']) : 'processing';
+
+    return [
+        'post_id'              => $post_id,
+        'post_title'           => $post ? $post->post_title : 'Unknown post',
+        'post_edit_link'       => $post ? get_edit_post_link($post_id, 'raw') : '',
+        'started_at'           => $started_at,
+        'started_at_display'   => $started_at ? whisper_format_unix_timestamp_for_display($started_at) : '',
+        'last_checked'         => $last_checked,
+        'last_checked_display' => $last_checked ? whisper_format_unix_timestamp_for_display($last_checked) : '',
+        'running_for'          => whisper_get_elapsed_time_label($started_at),
+        'status'               => $status,
+        'status_label'         => whisper_get_background_batch_status_label($status),
+    ];
 }
 
 function whisper_log_background_batch_error($message) {
@@ -168,6 +278,7 @@ function whisper_sync_background_batch_schedule() {
             wp_clear_scheduled_hook($hook_name);
         }
         whisper_clear_background_batch_state();
+        whisper_clear_background_batch_followup_tick();
         return;
     }
 
@@ -178,6 +289,10 @@ function whisper_sync_background_batch_schedule() {
 
     if (!$next_scheduled) {
         wp_schedule_event(time() + MINUTE_IN_SECONDS, $frequency, $hook_name);
+    }
+
+    if (whisper_background_batch_is_running()) {
+        whisper_schedule_background_batch_followup_tick(60);
     }
 }
 add_action('init', 'whisper_sync_background_batch_schedule', 20);
@@ -192,6 +307,7 @@ add_action('add_option_whisper_background_batch_frequency', 'whisper_background_
 
 function whisper_audio_transcription_deactivate() {
     wp_clear_scheduled_hook(whisper_get_background_batch_hook_name());
+    whisper_clear_background_batch_followup_tick();
     whisper_clear_background_batch_state();
 }
 register_deactivation_hook(__FILE__, 'whisper_audio_transcription_deactivate');
@@ -562,6 +678,9 @@ function whisper_process_background_batch_state($state, $api_key) {
         $response = whisper_assemblyai_api_request('GET', '/transcript/' . rawurlencode($transcript_id), $api_key);
         if (is_wp_error($response)) {
             whisper_log_background_batch_error('Failed to check transcript status for post ' . $post_id . ': ' . $response->get_error_message());
+            $state['status'] = 'check_error';
+            $state['last_checked'] = time();
+            whisper_set_background_batch_state($state);
             return;
         }
 
@@ -624,6 +743,9 @@ function whisper_run_background_batch_tick($force = false) {
     }
 
     if (whisper_get_transcription_lock()) {
+        if (whisper_background_batch_is_running()) {
+            whisper_schedule_background_batch_followup_tick(120);
+        }
         return [
             'status' => 'locked',
         ];
@@ -680,6 +802,15 @@ function whisper_run_background_batch_tick($force = false) {
 }
 add_action(whisper_get_background_batch_hook_name(), 'whisper_run_background_batch_tick');
 
+function whisper_run_background_batch_followup_tick() {
+    if (!whisper_background_batch_is_running()) {
+        return;
+    }
+
+    whisper_run_background_batch_tick(false);
+}
+add_action(whisper_get_background_batch_followup_hook_name(), 'whisper_run_background_batch_followup_tick');
+
 function whisper_get_background_batch_run_notice($status, $post_id = 0) {
     $status = sanitize_key((string) $status);
     $post_title = $post_id ? get_the_title($post_id) : '';
@@ -695,6 +826,11 @@ function whisper_get_background_batch_run_notice($status, $post_id = 0) {
             return [
                 'class'   => 'notice-info',
                 'message' => 'Background batch checked an in-progress transcription for ' . $message_title . '.',
+            ];
+        case 'already_running':
+            return [
+                'class'   => 'notice-warning',
+                'message' => 'A background batch is already in progress for ' . $message_title . '.',
             ];
         case 'completed':
             return [
@@ -726,6 +862,11 @@ function whisper_get_background_batch_run_notice($status, $post_id = 0) {
                 'class'   => 'notice-info',
                 'message' => 'Automatic background transcription is currently disabled.',
             ];
+        case 'cancelled':
+            return [
+                'class'   => 'notice-warning',
+                'message' => 'Background batch was cancelled.',
+            ];
         case 'no_candidate':
             return [
                 'class'   => 'notice-info',
@@ -739,27 +880,70 @@ function whisper_get_background_batch_run_notice($status, $post_id = 0) {
     }
 }
 
+function whisper_get_background_batch_settings_redirect_url($status, $post_id = 0) {
+    $redirect_url = add_query_arg([
+        'page'                     => 'whisper-audio-transcription',
+        'whisper_batch_run_status' => sanitize_key((string) $status),
+    ], admin_url('options-general.php'));
+
+    if ($post_id > 0) {
+        $redirect_url = add_query_arg('whisper_batch_post_id', intval($post_id), $redirect_url);
+    }
+
+    return $redirect_url;
+}
+
 function whisper_handle_run_background_batch_now() {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('You do not have permission to run the background batch.', 'whisper'));
     }
 
     check_admin_referer('whisper_run_background_batch_now');
-    $result = whisper_run_background_batch_tick(true);
-    $status = !empty($result['status']) ? sanitize_key($result['status']) : 'unknown';
-    $redirect_url = add_query_arg([
-        'page'                     => 'whisper-audio-transcription',
-        'whisper_batch_run_status' => $status,
-    ], admin_url('options-general.php'));
 
-    if (!empty($result['post_id'])) {
-        $redirect_url = add_query_arg('whisper_batch_post_id', intval($result['post_id']), $redirect_url);
+    $state = whisper_get_background_batch_state();
+    if (whisper_background_batch_is_running($state)) {
+        wp_safe_redirect(whisper_get_background_batch_settings_redirect_url('already_running', intval($state['post_id'])));
+        exit;
     }
 
+    if (whisper_get_transcription_lock()) {
+        wp_safe_redirect(whisper_get_background_batch_settings_redirect_url('locked', 0));
+        exit;
+    }
+
+    $result = whisper_run_background_batch_tick(true);
+    $status = !empty($result['status']) ? sanitize_key($result['status']) : 'unknown';
+    $redirect_url = whisper_get_background_batch_settings_redirect_url($status, !empty($result['post_id']) ? intval($result['post_id']) : 0);
     wp_safe_redirect($redirect_url);
     exit;
 }
 add_action('admin_post_whisper_run_background_batch_now', 'whisper_handle_run_background_batch_now');
+
+function whisper_handle_cancel_background_batch() {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__('You do not have permission to cancel the background batch.', 'whisper'));
+    }
+
+    check_admin_referer('whisper_cancel_background_batch');
+    $state = whisper_get_background_batch_state();
+    $post_id = whisper_background_batch_is_running($state) ? intval($state['post_id']) : 0;
+
+    if ($post_id > 0) {
+        update_post_meta($post_id, '_whisper_background_batch_error', 'Cancelled by admin.');
+        update_post_meta($post_id, '_whisper_background_batch_failed_at', time());
+    }
+
+    whisper_clear_background_batch_state();
+
+    $lock = whisper_get_transcription_lock();
+    if ($lock && !empty($lock['source']) && $lock['source'] === 'background_batch') {
+        whisper_clear_transcription_lock();
+    }
+
+    wp_safe_redirect(whisper_get_background_batch_settings_redirect_url('cancelled', $post_id));
+    exit;
+}
+add_action('admin_post_whisper_cancel_background_batch', 'whisper_handle_cancel_background_batch');
 
 function whisper_transcription_admin_shortcode_after_title($content) {
     $screen = get_current_screen();
@@ -795,6 +979,9 @@ function whisper_render_admin_transcriptions_page() {
 
     $items = whisper_get_transcribable_posts();
     $lock = whisper_get_transcription_lock();
+    $batch_state = whisper_get_background_batch_state();
+    $batch_details = whisper_get_background_batch_state_details($batch_state);
+    $background_batch_running = !empty($batch_details);
     $lock_message = 'No transcription is currently running.';
     if ($lock && isset($lock['post_id'])) {
         $locked_post = get_post($lock['post_id']);
@@ -806,7 +993,7 @@ function whisper_render_admin_transcriptions_page() {
                 $locked_user = $user->display_name;
             }
         }
-        $started_at = !empty($lock['started_at']) ? date_i18n(get_option('date_format') . ' ' . get_option('time_format'), $lock['started_at']) : '';
+        $started_at = !empty($lock['started_at']) ? whisper_format_unix_timestamp_for_display($lock['started_at']) : '';
         $lock_parts = ['Transcription in progress'];
         $lock_parts[] = $locked_title;
         if ($locked_user) {
@@ -824,6 +1011,30 @@ function whisper_render_admin_transcriptions_page() {
         <div id="whisper-global-status" class="notice notice-info">
             <p><?php echo esc_html($lock_message); ?></p>
         </div>
+        <?php if ($background_batch_running) : ?>
+            <div class="notice notice-warning">
+                <p>
+                    <strong>Background batch in progress:</strong>
+                    <?php if (!empty($batch_details['post_edit_link'])) : ?>
+                        <a href="<?php echo esc_url($batch_details['post_edit_link']); ?>"><?php echo esc_html($batch_details['post_title']); ?></a>
+                    <?php else : ?>
+                        <?php echo esc_html($batch_details['post_title']); ?>
+                    <?php endif; ?>
+                    (status: <?php echo esc_html($batch_details['status_label']); ?>).
+                </p>
+                <?php if (!empty($batch_details['started_at_display'])) : ?>
+                    <p>Started: <?php echo esc_html($batch_details['started_at_display']); ?><?php echo !empty($batch_details['running_for']) ? ' (' . esc_html($batch_details['running_for']) . ' ago)' : ''; ?>.</p>
+                <?php endif; ?>
+                <?php if (!empty($batch_details['last_checked_display'])) : ?>
+                    <p>Last checked: <?php echo esc_html($batch_details['last_checked_display']); ?>.</p>
+                <?php endif; ?>
+                <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                    <?php wp_nonce_field('whisper_cancel_background_batch'); ?>
+                    <input type="hidden" name="action" value="whisper_cancel_background_batch" />
+                    <?php submit_button('Cancel Background Batch', 'secondary', 'whisper_cancel_batch', false); ?>
+                </form>
+            </div>
+        <?php endif; ?>
         <table class="widefat fixed striped">
             <thead>
                 <tr>
@@ -842,13 +1053,7 @@ function whisper_render_admin_transcriptions_page() {
                 <?php else : ?>
                     <?php foreach ($items as $item) : ?>
                         <?php
-                        $transcribed_at_display = '';
-                        if (!empty($item['transcribed_at'])) {
-                            $timestamp = strtotime($item['transcribed_at']);
-                            if ($timestamp) {
-                                $transcribed_at_display = date_i18n(get_option('date_format') . ' ' . get_option('time_format'), $timestamp);
-                            }
-                        }
+                        $transcribed_at_display = whisper_format_mysql_datetime_for_display($item['transcribed_at']);
                         $legacy_notes = !empty($item['legacy_notes']) && is_array($item['legacy_notes']) ? $item['legacy_notes'] : [];
                         $status_text = 'Not transcribed';
                         $status_meta_lines = [];
@@ -902,6 +1107,7 @@ function whisper_render_admin_transcriptions_page() {
                                     class="button button-primary whisper-admin-transcribe"
                                     data-post-id="<?php echo esc_attr($item['post_id']); ?>"
                                     data-audio-url="<?php echo esc_attr($item['audio_url']); ?>"
+                                    <?php echo $background_batch_running ? 'disabled="disabled"' : ''; ?>
                                 >
                                     <?php echo $has_existing_transcription ? 'Re-transcribe' : 'Transcribe'; ?>
                                 </button>
@@ -940,6 +1146,16 @@ function whisper_acquire_transcription_lock() {
             'message' => 'Another transcription is already running.',
             'lock'    => $existing,
             'title'   => $locked_title,
+        ], 409);
+    }
+
+    $batch_state = whisper_get_background_batch_state();
+    if (whisper_background_batch_is_running($batch_state)) {
+        $batch_post = get_post(intval($batch_state['post_id']));
+        $batch_title = $batch_post ? $batch_post->post_title : 'background batch job';
+        wp_send_json_error([
+            'message' => 'A background batch transcription is currently running.',
+            'title'   => $batch_title,
         ], 409);
     }
 
@@ -1082,12 +1298,36 @@ function whisper_audio_transcription_settings_page() {
     $run_status = isset($_GET['whisper_batch_run_status']) ? sanitize_key(wp_unslash($_GET['whisper_batch_run_status'])) : '';
     $run_post_id = isset($_GET['whisper_batch_post_id']) ? intval($_GET['whisper_batch_post_id']) : 0;
     $run_notice = $run_status ? whisper_get_background_batch_run_notice($run_status, $run_post_id) : null;
+    $batch_details = whisper_get_background_batch_state_details();
+    $transcription_lock = whisper_get_transcription_lock();
+    $background_batch_running = !empty($batch_details);
+    $manual_kickoff_disabled = $background_batch_running || ($transcription_lock && isset($transcription_lock['post_id']));
+    $run_button_attributes = $manual_kickoff_disabled ? ['disabled' => 'disabled'] : [];
     ?>
     <div class="wrap">
         <h1>Audio Transcription Settings</h1>
         <?php if ($run_notice && !empty($run_notice['message'])) : ?>
             <div class="notice <?php echo esc_attr($run_notice['class']); ?> is-dismissible">
                 <p><?php echo esc_html($run_notice['message']); ?></p>
+            </div>
+        <?php endif; ?>
+        <?php if ($background_batch_running) : ?>
+            <div class="notice notice-warning">
+                <p>
+                    <strong>Background batch in progress:</strong>
+                    <?php if (!empty($batch_details['post_edit_link'])) : ?>
+                        <a href="<?php echo esc_url($batch_details['post_edit_link']); ?>"><?php echo esc_html($batch_details['post_title']); ?></a>
+                    <?php else : ?>
+                        <?php echo esc_html($batch_details['post_title']); ?>
+                    <?php endif; ?>
+                    (status: <?php echo esc_html($batch_details['status_label']); ?>).
+                </p>
+                <?php if (!empty($batch_details['started_at_display'])) : ?>
+                    <p>Started: <?php echo esc_html($batch_details['started_at_display']); ?><?php echo !empty($batch_details['running_for']) ? ' (' . esc_html($batch_details['running_for']) . ' ago)' : ''; ?>.</p>
+                <?php endif; ?>
+                <?php if (!empty($batch_details['last_checked_display'])) : ?>
+                    <p>Last checked: <?php echo esc_html($batch_details['last_checked_display']); ?>.</p>
+                <?php endif; ?>
             </div>
         <?php endif; ?>
         <form method="post" action="options.php">
@@ -1104,8 +1344,18 @@ function whisper_audio_transcription_settings_page() {
         <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
             <?php wp_nonce_field('whisper_run_background_batch_now'); ?>
             <input type="hidden" name="action" value="whisper_run_background_batch_now" />
-            <?php submit_button('Run Batch Now', 'secondary', 'whisper_run_batch_now', false); ?>
+            <?php submit_button('Run Batch Now', 'secondary', 'whisper_run_batch_now', false, $run_button_attributes); ?>
         </form>
+        <?php if ($manual_kickoff_disabled) : ?>
+            <p class="description">Manual kickoff is disabled while another transcription process is running.</p>
+        <?php endif; ?>
+        <?php if ($background_batch_running) : ?>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top: 10px;">
+                <?php wp_nonce_field('whisper_cancel_background_batch'); ?>
+                <input type="hidden" name="action" value="whisper_cancel_background_batch" />
+                <?php submit_button('Cancel Background Batch', 'secondary', 'whisper_cancel_batch', false); ?>
+            </form>
+        <?php endif; ?>
     </div>
     <?php
 }
@@ -1160,7 +1410,7 @@ function whisper_audio_transcription_setting_input_background_batch_enabled() {
 function whisper_audio_transcription_setting_input_background_batch_frequency() {
     $selected_frequency = whisper_get_background_batch_frequency();
     $frequency_options = whisper_get_background_batch_frequency_options();
-    $state = whisper_get_background_batch_state();
+    $batch_details = whisper_get_background_batch_state_details();
     ?>
     <select id="whisper_background_batch_frequency" name="whisper_background_batch_frequency">
         <?php foreach ($frequency_options as $frequency_value => $frequency_label) : ?>
@@ -1173,17 +1423,24 @@ function whisper_audio_transcription_setting_input_background_batch_frequency() 
 
     $next_run = wp_next_scheduled(whisper_get_background_batch_hook_name());
     if ($next_run) {
-        echo '<p class="description">Next scheduled run: ' . esc_html(date_i18n(get_option('date_format') . ' ' . get_option('time_format'), $next_run)) . '.</p>';
+        echo '<p class="description">Next scheduled run: ' . esc_html(whisper_format_unix_timestamp_for_display($next_run)) . '.</p>';
     } else {
         echo '<p class="description">No batch run is currently scheduled. Save settings to apply changes.</p>';
     }
 
-    if (!empty($state['post_id'])) {
-        $post_title = get_the_title(intval($state['post_id']));
-        $status = !empty($state['status']) ? sanitize_text_field($state['status']) : 'processing';
-        if ($post_title) {
-            echo '<p class="description">Current background job: ' . esc_html($post_title) . ' (' . esc_html($status) . ').</p>';
-        }
+    $timezone_label = wp_timezone_string();
+    if ($timezone_label === '') {
+        $timezone_label = 'UTC';
+    }
+    echo '<p class="description">Displayed times use the WordPress site timezone: ' . esc_html($timezone_label) . '.</p>';
+
+    if (!empty($batch_details['post_title'])) {
+        $running_label = !empty($batch_details['running_for']) ? ' running for ' . $batch_details['running_for'] : '';
+        echo '<p class="description">Current background job: ' . esc_html($batch_details['post_title']) . ' (' . esc_html($batch_details['status_label']) . $running_label . ').</p>';
+    }
+
+    if (!empty($batch_details['last_checked_display'])) {
+        echo '<p class="description">Last status check: ' . esc_html($batch_details['last_checked_display']) . '.</p>';
     }
 }
 ?>
