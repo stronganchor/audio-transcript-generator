@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field.
-Version: 2.0.2
+Version: 2.0.3
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -87,6 +87,54 @@ function whisper_clear_transcription_lock() {
     delete_transient('whisper_transcription_lock');
 }
 
+function whisper_get_legacy_transcription_word_threshold() {
+    $threshold = intval(apply_filters('whisper_legacy_transcription_word_threshold', 800));
+    return max(1, $threshold);
+}
+
+function whisper_detect_legacy_transcription($post_id) {
+    $post = get_post($post_id);
+    if (!$post || !is_string($post->post_content)) {
+        return [
+            'has_marker'     => false,
+            'is_possible'    => false,
+            'word_count'     => 0,
+            'word_threshold' => whisper_get_legacy_transcription_word_threshold(),
+            'notes'          => [],
+        ];
+    }
+
+    $content = $post->post_content;
+    $stripped_content = trim(preg_replace('/\s+/', ' ', wp_strip_all_tags($content)));
+    $word_count = str_word_count($stripped_content);
+    $word_threshold = whisper_get_legacy_transcription_word_threshold();
+
+    $heading_pattern = '/<h[1-6][^>]*>\s*audio\s+transcript(?:ion)?\s*<\/h[1-6]>/i';
+    $text_pattern = '/\baudio\s+transcript(?:ion)?\b/i';
+    $has_heading_marker = preg_match($heading_pattern, $content) === 1;
+    $has_text_marker = preg_match($text_pattern, $stripped_content) === 1;
+    $has_marker = $has_heading_marker || $has_text_marker;
+
+    $is_long_post = $word_count >= $word_threshold;
+    $is_possible = $has_marker || $is_long_post;
+
+    $notes = [];
+    if ($has_marker) {
+        $notes[] = 'Legacy marker found: "Audio Transcript" heading/text.';
+    }
+    if ($is_long_post) {
+        $notes[] = 'Possible legacy transcription: post length - ' . number_format_i18n($word_count) . ' words (threshold: ' . number_format_i18n($word_threshold) . ').';
+    }
+
+    return [
+        'has_marker'     => $has_marker,
+        'is_possible'    => $is_possible,
+        'word_count'     => $word_count,
+        'word_threshold' => $word_threshold,
+        'notes'          => $notes,
+    ];
+}
+
 function whisper_get_transcribable_posts() {
     $query = new WP_Query([
         'post_type'      => whisper_get_supported_post_types(),
@@ -107,6 +155,7 @@ function whisper_get_transcribable_posts() {
         $post_type_obj = get_post_type_object($post_type);
         $transcription_post_id = intval(get_post_meta($post_id, '_whisper_transcription_post_id', true));
         $transcribed_at = get_post_meta($post_id, '_whisper_transcribed_at', true);
+        $legacy_detection = whisper_detect_legacy_transcription($post_id);
 
         $items[] = [
             'post_id'               => $post_id,
@@ -119,6 +168,11 @@ function whisper_get_transcribable_posts() {
             'transcription_post_id' => $transcription_post_id,
             'transcription_link'    => $transcription_post_id ? get_permalink($transcription_post_id) : '',
             'transcribed_at'        => $transcribed_at,
+            'legacy_marker_found'   => $legacy_detection['has_marker'],
+            'legacy_possible'       => $legacy_detection['is_possible'],
+            'legacy_word_count'     => $legacy_detection['word_count'],
+            'legacy_word_threshold' => $legacy_detection['word_threshold'],
+            'legacy_notes'          => $legacy_detection['notes'],
         ];
     }
 
@@ -213,6 +267,25 @@ function whisper_render_admin_transcriptions_page() {
                                 $transcribed_at_display = date_i18n(get_option('date_format') . ' ' . get_option('time_format'), $timestamp);
                             }
                         }
+                        $legacy_notes = !empty($item['legacy_notes']) && is_array($item['legacy_notes']) ? $item['legacy_notes'] : [];
+                        $status_text = 'Not transcribed';
+                        $status_meta_lines = [];
+
+                        if ($transcribed_at_display) {
+                            $status_text = 'Transcribed';
+                            $status_meta_lines[] = 'Last transcribed: ' . $transcribed_at_display;
+                        } elseif (!empty($item['legacy_marker_found'])) {
+                            $status_text = 'Likely legacy transcription';
+                            $status_meta_lines = $legacy_notes;
+                        } elseif (!empty($item['legacy_possible'])) {
+                            $status_text = 'Possible legacy transcription';
+                            $status_meta_lines = $legacy_notes;
+                            if (empty($status_meta_lines)) {
+                                $status_meta_lines[] = 'Possible legacy transcription: post length - ' . number_format_i18n($item['legacy_word_count']) . ' words (threshold: ' . number_format_i18n($item['legacy_word_threshold']) . ').';
+                            }
+                        }
+
+                        $has_existing_transcription = $transcribed_at_display || !empty($item['legacy_possible']);
                         ?>
                         <tr data-post-id="<?php echo esc_attr($item['post_id']); ?>" data-post-link="<?php echo esc_url($item['view_link']); ?>">
                             <td>
@@ -222,10 +295,12 @@ function whisper_render_admin_transcriptions_page() {
                             <td><code class="whisper-audio-url"><?php echo esc_html($item['audio_url']); ?></code></td>
                             <td class="whisper-status">
                                 <div class="whisper-status-text">
-                                    <?php echo $transcribed_at_display ? 'Transcribed' : 'Not transcribed'; ?>
+                                    <?php echo esc_html($status_text); ?>
                                 </div>
-                                <?php if ($transcribed_at_display) : ?>
-                                    <div class="whisper-status-meta">Last transcribed: <?php echo esc_html($transcribed_at_display); ?></div>
+                                <?php if (!empty($status_meta_lines)) : ?>
+                                    <?php foreach ($status_meta_lines as $status_meta_line) : ?>
+                                        <div class="whisper-status-meta"><?php echo esc_html($status_meta_line); ?></div>
+                                    <?php endforeach; ?>
                                 <?php endif; ?>
                                 <div class="whisper-status-links">
                                     <?php if (!empty($item['view_link'])) : ?>
@@ -246,7 +321,7 @@ function whisper_render_admin_transcriptions_page() {
                                     data-post-id="<?php echo esc_attr($item['post_id']); ?>"
                                     data-audio-url="<?php echo esc_attr($item['audio_url']); ?>"
                                 >
-                                    <?php echo $transcribed_at_display ? 'Re-transcribe' : 'Transcribe'; ?>
+                                    <?php echo $has_existing_transcription ? 'Re-transcribe' : 'Transcribe'; ?>
                                 </button>
                             </td>
                         </tr>
