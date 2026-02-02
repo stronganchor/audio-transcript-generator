@@ -26,6 +26,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 const params = {
                     audio_url: audioUrl,
                     speaker_labels: true,
+                    punctuate: true,
+                    format_text: true,
                 };
 
                 const response = await fetch('https://api.assemblyai.com/v2/transcript', {
@@ -78,9 +80,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 if (pollData.status === 'completed') {
                     transcriptionCompleted = true;
-                    statusDiv.innerHTML += `<br>Transcription completed.`;
+                    statusDiv.innerHTML += `<br>Transcription completed. Formatting paragraphs...`;
                     console.log('Transcription completed:', pollData.text);
-                    await saveTranscription(pollData.text, audioUrl, postId);
+                    let formattedText = null;
+                    try {
+                        formattedText = await fetchParagraphs(apiKey, transcriptId);
+                    } catch (error) {
+                        console.error('Error fetching formatted paragraphs:', error);
+                        statusDiv.innerHTML += `<br>Could not format paragraphs; saving raw transcript.`;
+                    }
+                    const textToSave = formattedText || pollData.text || '';
+                    await saveTranscription(textToSave, audioUrl, postId);
                 } else if (pollData.status === 'failed') {
                     console.error(`Transcription failed: ${pollData.error}`);
                     statusDiv.innerHTML = `Transcription failed: ${pollData.error}`;
@@ -136,5 +146,29 @@ document.addEventListener('DOMContentLoaded', function() {
             transcriptionButton.disabled = false;
             document.querySelector('#audio_url').disabled = false;
         }  
+    }
+
+    async function fetchParagraphs(apiKey, transcriptId) {
+        const response = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}/paragraphs`, {
+            method: 'GET',
+            headers: {
+                'authorization': apiKey,
+                'content-type': 'application/json',
+            },
+        });
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        if (!data.paragraphs || !Array.isArray(data.paragraphs)) {
+            return null;
+        }
+        const paragraphs = data.paragraphs
+            .map(p => (p && p.text ? p.text.trim() : ''))
+            .filter(Boolean);
+        if (!paragraphs.length) {
+            return null;
+        }
+        return paragraphs.join('\n\n');
     }
 });
