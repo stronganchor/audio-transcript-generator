@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field.
-Version: 2.0.6
+Version: 2.0.7
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
 */
@@ -140,9 +140,81 @@ function whisper_get_background_batch_frequency() {
     return $frequency;
 }
 
+function whisper_background_batch_stall_timeout() {
+    $timeout = intval(apply_filters('whisper_background_batch_stall_timeout', DAY_IN_SECONDS));
+    return max(HOUR_IN_SECONDS, $timeout);
+}
+
+function whisper_maybe_cancel_stalled_background_batch_state($state) {
+    if (!is_array($state)) {
+        return [];
+    }
+
+    if (empty($state['post_id']) || empty($state['transcript_id'])) {
+        return $state;
+    }
+
+    $started_at = !empty($state['started_at']) ? intval($state['started_at']) : 0;
+    $last_checked = !empty($state['last_checked']) ? intval($state['last_checked']) : 0;
+    $age_anchor = $started_at > 0 ? $started_at : $last_checked;
+    if ($age_anchor <= 0) {
+        return $state;
+    }
+
+    $now = time();
+    if ($age_anchor > $now) {
+        return $state;
+    }
+
+    $stall_timeout = whisper_background_batch_stall_timeout();
+    if (($now - $age_anchor) < $stall_timeout) {
+        return $state;
+    }
+
+    $post_id = intval($state['post_id']);
+    $status = !empty($state['status']) ? sanitize_key((string) $state['status']) : 'processing';
+    $status_label = str_replace('_', ' ', $status);
+    $status_label = $status_label !== '' ? $status_label : 'processing';
+    $duration_label = human_time_diff($age_anchor, $now);
+    $error_message = sprintf(
+        'Background batch was automatically cancelled after remaining %1$s for %2$s.',
+        $status_label,
+        $duration_label
+    );
+
+    whisper_log_background_batch_error(
+        sprintf(
+            'Auto-cancelled stalled batch for post %1$d (transcript %2$s) after %3$d seconds.',
+            $post_id,
+            sanitize_text_field((string) $state['transcript_id']),
+            $now - $age_anchor
+        )
+    );
+
+    if ($post_id > 0) {
+        update_post_meta($post_id, '_whisper_background_batch_error', $error_message);
+        update_post_meta($post_id, '_whisper_background_batch_failed_at', $now);
+    }
+
+    whisper_clear_background_batch_state();
+
+    $lock = whisper_get_transcription_lock();
+    if (
+        $lock &&
+        !empty($lock['source']) &&
+        $lock['source'] === 'background_batch' &&
+        (empty($lock['post_id']) || intval($lock['post_id']) === $post_id)
+    ) {
+        whisper_clear_transcription_lock();
+    }
+
+    return [];
+}
+
 function whisper_get_background_batch_state() {
     $state = get_option('whisper_background_batch_state', []);
-    return is_array($state) ? $state : [];
+    $state = is_array($state) ? $state : [];
+    return whisper_maybe_cancel_stalled_background_batch_state($state);
 }
 
 function whisper_background_batch_is_running($state = null) {
