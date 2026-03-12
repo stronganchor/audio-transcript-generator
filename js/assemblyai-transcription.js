@@ -136,7 +136,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     action: 'save_transcription',
                     transcription: transcriptionText,
                     audio_url: audioUrl,
-                    post_id: postId
+                    post_id: postId,
+                    nonce: assemblyai_settings.save_nonce || ''
                 }),
             });
         

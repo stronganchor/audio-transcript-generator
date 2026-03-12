@@ -1194,7 +1194,6 @@ function whisper_render_admin_transcriptions_page() {
 }
 
 add_action('wp_ajax_save_transcription', 'save_transcription_callback');
-add_action('wp_ajax_nopriv_save_transcription', 'save_transcription_callback');
 add_action('wp_ajax_whisper_acquire_transcription_lock', 'whisper_acquire_transcription_lock');
 add_action('wp_ajax_whisper_release_transcription_lock', 'whisper_release_transcription_lock');
 
@@ -1259,6 +1258,12 @@ function whisper_release_transcription_lock() {
 
 function save_transcription_callback() {
     try {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'You do not have permission to save a transcription.'], 403);
+        }
+
+        check_ajax_referer('whisper_save_transcription', 'nonce');
+
         if (isset($_POST['transcription']) && isset($_POST['audio_url']) && isset($_POST['post_id'])) {
             $transcription_text = sanitize_textarea_field($_POST['transcription']);
             $audio_url = sanitize_text_field($_POST['audio_url']);
@@ -1294,6 +1299,7 @@ function enqueue_transcription_script() {
         'assemblyai_api_key' => $assemblyai_api,
         'post_id'            => get_the_ID(),
         'lock_nonce'         => current_user_can('manage_options') ? wp_create_nonce('whisper_transcription_lock') : '',
+        'save_nonce'         => current_user_can('manage_options') ? wp_create_nonce('whisper_save_transcription') : '',
     ]);
 }
 add_action('wp_enqueue_scripts', 'enqueue_transcription_script');
