@@ -7,6 +7,7 @@ A WordPress plugin that submits an audio file URL to AssemblyAI for transcriptio
 - Prefills the audio URL by scanning post content and post meta for mp3/wav/ogg links.
 - Creates a "Transcriptions" custom post type for saved transcripts.
 - Appends the transcript to the original post content.
+- Saves AssemblyAI paragraph timings and highlights the active transcript paragraph during audio playback.
 - Optional background batch mode that auto-transcribes one eligible post per cron run.
 - Speaker labels enabled by default.
 - GitHub-based update checking via the bundled plugin update checker.
@@ -67,19 +68,23 @@ This renders the same URL input and "Transcribe" button on the front end. The AP
    - `POST https://api.assemblyai.com/v2/transcript`
 2. The browser polls the transcript status every 5 seconds:
    - `GET https://api.assemblyai.com/v2/transcript/{id}`
-3. When complete, the browser sends the transcript to WordPress:
+3. When complete, the browser fetches paragraph formatting and timings:
+   - `GET https://api.assemblyai.com/v2/transcript/{id}/paragraphs`
+4. The browser sends the transcript and paragraph timing data to WordPress:
    - `POST admin-ajax.php?action=save_transcription`
-4. WordPress creates a new `transcription` post and appends the text to the original post content.
+5. WordPress creates a new `transcription` post and appends the text to the original post content.
 
 Optional background mode:
 1. WordPress cron selects the most recent eligible post.
 2. It submits the audio URL to AssemblyAI and stores the transcript ID.
-3. On later cron runs, it checks status and saves the transcript when complete.
+3. On later cron runs, it checks status, fetches paragraph timings, and saves the transcript when complete.
 
 ## Data storage
-- Transcripts are saved as plain text (sanitized) in WordPress post content.
+- Transcripts with paragraph timings are saved as escaped HTML spans with `data-whisper-start` and `data-whisper-end` attributes.
+- If paragraph timings are unavailable, transcripts fall back to plain sanitized text.
 - A new `transcription` post is created with the audio file name as the title.
 - The transcript is appended to the original post body with an "Audio Transcript" heading.
+- Timing metadata is also stored in `_whisper_transcript_segments`.
 - Background mode state is tracked in `whisper_background_batch_state`.
 
 ## APIs and services used
@@ -89,7 +94,7 @@ Optional background mode:
 
 ## Security considerations
 - The AssemblyAI API key is exposed to the browser for admin users. Only use this in trusted admin contexts.
-- The `save_transcription` AJAX endpoint is registered for unauthenticated requests (`wp_ajax_nopriv_save_transcription`) and does not include nonce or capability checks. If you need stricter controls, add a nonce and capability verification in `save_transcription_callback`.
+- The `save_transcription` AJAX endpoint requires the `manage_options` capability and a WordPress nonce.
 
 ## Customization
 - Change supported post types in `whisper_add_transcription_meta_box` in `audio-transcript-generator.php`.

@@ -1,0 +1,10 @@
+.whisper-transcript-segment {
+    border-radius: 2px;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    transition: background-color 0.15s ease;
+}
+
+.whisper-transcript-segment-active {
+    background: rgba(255, 226, 84, 0.55);
+}

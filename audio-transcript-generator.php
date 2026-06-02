@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field.
-Version: 2.0.8
+Version: 2.0.9
 Update URI: https://github.com/stronganchor/audio-transcript-generator
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
@@ -585,7 +585,79 @@ function whisper_assemblyai_api_request($method, $endpoint, $api_key, $body = nu
     return $data;
 }
 
-function whisper_save_transcription_result($post_id, $audio_url, $transcription_text, $transcribed_by = 0) {
+function whisper_normalize_assemblyai_timestamp($timestamp) {
+    if (!is_numeric($timestamp)) {
+        return null;
+    }
+
+    $milliseconds = floatval($timestamp);
+    if ($milliseconds < 0) {
+        return null;
+    }
+
+    return round($milliseconds / 1000, 3);
+}
+
+function whisper_normalize_timed_transcript_segments($segments) {
+    if (!is_array($segments)) {
+        return [];
+    }
+
+    $normalized = [];
+    foreach ($segments as $segment) {
+        if (!is_array($segment)) {
+            continue;
+        }
+
+        $text = isset($segment['text']) ? trim(sanitize_textarea_field((string) $segment['text'])) : '';
+        $start = whisper_normalize_assemblyai_timestamp($segment['start'] ?? null);
+        $end = whisper_normalize_assemblyai_timestamp($segment['end'] ?? null);
+        if ($text === '' || is_null($start) || is_null($end) || $end <= $start) {
+            continue;
+        }
+
+        $normalized[] = [
+            'text'  => $text,
+            'start' => $start,
+            'end'   => $end,
+        ];
+    }
+
+    return $normalized;
+}
+
+function whisper_format_transcript_time_attribute($seconds) {
+    $formatted = rtrim(rtrim(number_format((float) $seconds, 3, '.', ''), '0'), '.');
+    return $formatted === '' ? '0' : $formatted;
+}
+
+function whisper_build_timed_transcript_html($segments, $audio_url) {
+    $segments = whisper_normalize_timed_transcript_segments($segments);
+    if (empty($segments)) {
+        return '';
+    }
+
+    $html = '<div class="whisper-transcript" data-whisper-transcript="1" data-whisper-audio-url="' . esc_attr($audio_url) . '">';
+    foreach ($segments as $segment) {
+        $html .= '<p><span class="whisper-transcript-segment" data-whisper-start="' . esc_attr(whisper_format_transcript_time_attribute($segment['start'])) . '" data-whisper-end="' . esc_attr(whisper_format_transcript_time_attribute($segment['end'])) . '">';
+        $html .= esc_html($segment['text']);
+        $html .= '</span></p>';
+    }
+    $html .= '</div>';
+
+    return $html;
+}
+
+function whisper_build_transcription_content($transcription_text, $audio_url, $segments = []) {
+    $timed_html = whisper_build_timed_transcript_html($segments, $audio_url);
+    if ($timed_html !== '') {
+        return $timed_html;
+    }
+
+    return $transcription_text;
+}
+
+function whisper_save_transcription_result($post_id, $audio_url, $transcription_text, $transcribed_by = 0, $segments = []) {
     $post_id = intval($post_id);
     if (!$post_id) {
         return new WP_Error('whisper_invalid_post', 'Invalid post ID.');
@@ -606,6 +678,8 @@ function whisper_save_transcription_result($post_id, $audio_url, $transcription_
         return new WP_Error('whisper_missing_post', 'Original post not found.');
     }
 
+    $transcription_content = whisper_build_transcription_content($transcription_text, $audio_url, $segments);
+
     $audio_file_name = basename((string) parse_url($audio_url, PHP_URL_PATH));
     if (!$audio_file_name) {
         $audio_file_name = 'audio-transcript-' . $post_id;
@@ -613,7 +687,7 @@ function whisper_save_transcription_result($post_id, $audio_url, $transcription_
 
     $new_post_id = wp_insert_post([
         'post_title'   => sanitize_text_field($audio_file_name),
-        'post_content' => $transcription_text,
+        'post_content' => $transcription_content,
         'post_status'  => 'publish',
         'post_type'    => 'transcription',
     ], true);
@@ -622,7 +696,7 @@ function whisper_save_transcription_result($post_id, $audio_url, $transcription_
         return $new_post_id;
     }
 
-    $new_content = $current_post->post_content . "\n\n" . '<h3>Audio Transcript</h3>' . "\n" . $transcription_text;
+    $new_content = $current_post->post_content . "\n\n" . '<h3>Audio Transcript</h3>' . "\n" . $transcription_content;
     remove_action('wp_insert_post', 'wp_save_post_revision');
     $update_result = wp_update_post([
         'ID'           => $post_id,
@@ -639,6 +713,17 @@ function whisper_save_transcription_result($post_id, $audio_url, $transcription_
     update_post_meta($post_id, '_whisper_transcription_post_id', $new_post_id);
     update_post_meta($post_id, '_whisper_transcribed_at', $transcribed_at);
     update_post_meta($post_id, '_whisper_transcribed_by', max(0, intval($transcribed_by)));
+    update_post_meta($new_post_id, '_whisper_source_post_id', $post_id);
+    update_post_meta($new_post_id, '_whisper_audio_url', $audio_url);
+    $normalized_segments = whisper_normalize_timed_transcript_segments($segments);
+    if (!empty($normalized_segments)) {
+        $encoded_segments = wp_json_encode($normalized_segments);
+        update_post_meta($post_id, '_whisper_transcript_segments', $encoded_segments);
+        update_post_meta($new_post_id, '_whisper_transcript_segments', $encoded_segments);
+    } else {
+        delete_post_meta($post_id, '_whisper_transcript_segments');
+        delete_post_meta($new_post_id, '_whisper_transcript_segments');
+    }
     delete_post_meta($post_id, '_whisper_background_batch_error');
     delete_post_meta($post_id, '_whisper_background_batch_failed_at');
 
@@ -652,7 +737,12 @@ function whisper_save_transcription_result($post_id, $audio_url, $transcription_
     ];
 }
 
-function whisper_get_completed_transcription_text($transcript_id, $api_key, $fallback_text = '') {
+function whisper_get_completed_transcription_result($transcript_id, $api_key, $fallback_text = '') {
+    $result = [
+        'text'     => trim((string) $fallback_text),
+        'segments' => [],
+    ];
+
     $paragraph_response = whisper_assemblyai_api_request('GET', '/transcript/' . rawurlencode($transcript_id) . '/paragraphs', $api_key);
     if (!is_wp_error($paragraph_response) && !empty($paragraph_response['paragraphs']) && is_array($paragraph_response['paragraphs'])) {
         $paragraphs = [];
@@ -664,11 +754,17 @@ function whisper_get_completed_transcription_text($transcript_id, $api_key, $fal
         }
 
         if (!empty($paragraphs)) {
-            return implode("\n\n", $paragraphs);
+            $result['text'] = implode("\n\n", $paragraphs);
+            $result['segments'] = $paragraph_response['paragraphs'];
         }
     }
 
-    return trim((string) $fallback_text);
+    return $result;
+}
+
+function whisper_get_completed_transcription_text($transcript_id, $api_key, $fallback_text = '') {
+    $result = whisper_get_completed_transcription_result($transcript_id, $api_key, $fallback_text);
+    return $result['text'];
 }
 
 function whisper_start_background_batch_transcription($candidate, $api_key) {
@@ -760,7 +856,8 @@ function whisper_process_background_batch_state($state, $api_key) {
         $status = !empty($response['status']) ? strtolower((string) $response['status']) : 'processing';
         if ($status === 'completed') {
             $audio_url = !empty($state['audio_url']) ? esc_url_raw($state['audio_url']) : whisper_find_audio_url($post_id);
-            $transcript_text = whisper_get_completed_transcription_text($transcript_id, $api_key, !empty($response['text']) ? (string) $response['text'] : '');
+            $transcript_result = whisper_get_completed_transcription_result($transcript_id, $api_key, !empty($response['text']) ? (string) $response['text'] : '');
+            $transcript_text = $transcript_result['text'];
             if (!$audio_url || $transcript_text === '') {
                 $error_message = 'Missing audio URL or transcript text for post ' . $post_id . '.';
                 whisper_log_background_batch_error($error_message);
@@ -770,7 +867,7 @@ function whisper_process_background_batch_state($state, $api_key) {
                 return;
             }
 
-            $save_result = whisper_save_transcription_result($post_id, $audio_url, $transcript_text, 0);
+            $save_result = whisper_save_transcription_result($post_id, $audio_url, $transcript_text, 0, $transcript_result['segments']);
             if (is_wp_error($save_result)) {
                 $error_message = 'Failed to save transcript for post ' . $post_id . ': ' . $save_result->get_error_message();
                 whisper_log_background_batch_error($error_message);
@@ -1266,10 +1363,18 @@ function save_transcription_callback() {
         check_ajax_referer('whisper_save_transcription', 'nonce');
 
         if (isset($_POST['transcription']) && isset($_POST['audio_url']) && isset($_POST['post_id'])) {
-            $transcription_text = sanitize_textarea_field($_POST['transcription']);
-            $audio_url = sanitize_text_field($_POST['audio_url']);
+            $transcription_text = sanitize_textarea_field(wp_unslash($_POST['transcription']));
+            $audio_url = sanitize_text_field(wp_unslash($_POST['audio_url']));
             $post_id = intval($_POST['post_id']);
-            $save_result = whisper_save_transcription_result($post_id, $audio_url, $transcription_text, get_current_user_id());
+            $segments = [];
+            if (isset($_POST['transcription_segments'])) {
+                $decoded_segments = json_decode(wp_unslash((string) $_POST['transcription_segments']), true);
+                if (is_array($decoded_segments)) {
+                    $segments = $decoded_segments;
+                }
+            }
+
+            $save_result = whisper_save_transcription_result($post_id, $audio_url, $transcription_text, get_current_user_id(), $segments);
             if (is_wp_error($save_result)) {
                 wp_send_json_error(['message' => $save_result->get_error_message()]);
             }
@@ -1306,6 +1411,32 @@ function enqueue_transcription_script() {
 add_action('wp_enqueue_scripts', 'enqueue_transcription_script');
 add_action('admin_enqueue_scripts', 'enqueue_transcription_script');
 
+function whisper_enqueue_transcript_highlighter_assets() {
+    if (!is_singular()) {
+        return;
+    }
+
+    $script_path = 'js/transcript-highlighter.js';
+    $style_path = 'css/transcript-highlighter.css';
+    $script_version = filemtime(plugin_dir_path(__FILE__) . $script_path);
+    $style_version = filemtime(plugin_dir_path(__FILE__) . $style_path);
+
+    wp_enqueue_script(
+        'whisper-transcript-highlighter',
+        plugin_dir_url(__FILE__) . $script_path,
+        [],
+        $script_version,
+        true
+    );
+    wp_enqueue_style(
+        'whisper-transcript-highlighter',
+        plugin_dir_url(__FILE__) . $style_path,
+        [],
+        $style_version
+    );
+}
+add_action('wp_enqueue_scripts', 'whisper_enqueue_transcript_highlighter_assets');
+
 function whisper_enqueue_admin_transcriptions_assets($hook) {
     if ($hook !== 'toplevel_page_whisper-audio-transcriptions') {
         return;
@@ -1335,6 +1466,7 @@ function whisper_enqueue_admin_transcriptions_assets($hook) {
         'ajax_url'           => admin_url('admin-ajax.php'),
         'assemblyai_api_key' => current_user_can('manage_options') ? whisper_get_assemblyai_api_key() : '',
         'lock_nonce'         => wp_create_nonce('whisper_transcription_lock'),
+        'save_nonce'         => wp_create_nonce('whisper_save_transcription'),
         'current_lock'       => $lock,
     ]);
 }

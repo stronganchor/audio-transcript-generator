@@ -242,8 +242,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 completed = true;
                 setRowStatus(row, 'Formatting transcript...');
                 setRowProgress(row, 90);
-                const formattedText = await fetchParagraphs(transcriptId);
-                await saveTranscription(formattedText || pollData.text || '', audioUrl, postId, row, button);
+                const transcriptData = await fetchParagraphs(transcriptId);
+                await saveTranscription(transcriptData.text || pollData.text || '', transcriptData.segments || [], audioUrl, postId, row, button);
                 setRowProgress(row, 100);
                 setGlobalStatus('Transcription completed.');
             } else if (pollData.status === 'failed') {
@@ -276,21 +276,41 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const data = await response.json();
         if (data.error) {
-            return null;
+            return {
+                text: '',
+                segments: [],
+            };
         }
         if (!data.paragraphs || !Array.isArray(data.paragraphs)) {
-            return null;
+            return {
+                text: '',
+                segments: [],
+            };
         }
         const paragraphs = data.paragraphs
             .map(p => (p && p.text ? p.text.trim() : ''))
             .filter(Boolean);
         if (!paragraphs.length) {
-            return null;
+            return {
+                text: '',
+                segments: [],
+            };
         }
-        return paragraphs.join('\n\n');
+        const segments = data.paragraphs
+            .map(p => ({
+                text: p && p.text ? p.text.trim() : '',
+                start: p && Number.isFinite(Number(p.start)) ? Number(p.start) : null,
+                end: p && Number.isFinite(Number(p.end)) ? Number(p.end) : null,
+            }))
+            .filter(segment => segment.text && segment.start !== null && segment.end !== null && segment.end > segment.start);
+
+        return {
+            text: paragraphs.join('\n\n'),
+            segments,
+        };
     }
 
-    async function saveTranscription(transcriptionText, audioUrl, postId, row, button) {
+    async function saveTranscription(transcriptionText, transcriptSegments, audioUrl, postId, row, button) {
         setRowStatus(row, 'Saving transcript to WordPress...');
         const response = await fetch(assemblyai_admin.ajax_url, {
             method: 'POST',
@@ -300,8 +320,10 @@ document.addEventListener('DOMContentLoaded', function() {
             body: new URLSearchParams({
                 action: 'save_transcription',
                 transcription: transcriptionText,
+                transcription_segments: JSON.stringify(transcriptSegments || []),
                 audio_url: audioUrl,
                 post_id: postId,
+                nonce: assemblyai_admin.save_nonce || '',
             }),
         });
 

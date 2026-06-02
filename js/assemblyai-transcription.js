@@ -95,15 +95,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     transcriptionCompleted = true;
                     statusDiv.innerHTML += `<br>Transcription completed. Formatting paragraphs...`;
                     console.log('Transcription completed:', pollData.text);
-                    let formattedText = null;
+                    let transcriptData = {
+                        text: pollData.text || '',
+                        segments: [],
+                    };
                     try {
-                        formattedText = await fetchParagraphs(apiKey, transcriptId);
+                        transcriptData = await fetchParagraphs(apiKey, transcriptId);
                     } catch (error) {
                         console.error('Error fetching formatted paragraphs:', error);
                         statusDiv.innerHTML += `<br>Could not format paragraphs; saving raw transcript.`;
                     }
-                    const textToSave = formattedText || pollData.text || '';
-                    await saveTranscription(textToSave, audioUrl, postId);
+                    const textToSave = transcriptData.text || pollData.text || '';
+                    await saveTranscription(textToSave, audioUrl, postId, transcriptData.segments || []);
                 } else if (pollData.status === 'failed') {
                     console.error(`Transcription failed: ${pollData.error}`);
                     statusDiv.innerHTML = `Transcription failed: ${pollData.error}`;
@@ -125,7 +128,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function saveTranscription(transcriptionText, audioUrl, postId) {
+    async function saveTranscription(transcriptionText, audioUrl, postId, transcriptSegments) {
         try {
             const response = await fetch(assemblyai_settings.ajax_url, {
                 method: 'POST',
@@ -135,6 +138,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 body: new URLSearchParams({
                     action: 'save_transcription',
                     transcription: transcriptionText,
+                    transcription_segments: JSON.stringify(transcriptSegments || []),
                     audio_url: audioUrl,
                     post_id: postId,
                     nonce: assemblyai_settings.save_nonce || ''
@@ -175,15 +179,32 @@ document.addEventListener('DOMContentLoaded', function() {
             throw new Error(data.error);
         }
         if (!data.paragraphs || !Array.isArray(data.paragraphs)) {
-            return null;
+            return {
+                text: '',
+                segments: [],
+            };
         }
         const paragraphs = data.paragraphs
             .map(p => (p && p.text ? p.text.trim() : ''))
             .filter(Boolean);
         if (!paragraphs.length) {
-            return null;
+            return {
+                text: '',
+                segments: [],
+            };
         }
-        return paragraphs.join('\n\n');
+        const segments = data.paragraphs
+            .map(p => ({
+                text: p && p.text ? p.text.trim() : '',
+                start: p && Number.isFinite(Number(p.start)) ? Number(p.start) : null,
+                end: p && Number.isFinite(Number(p.end)) ? Number(p.end) : null,
+            }))
+            .filter(segment => segment.text && segment.start !== null && segment.end !== null && segment.end > segment.start);
+
+        return {
+            text: paragraphs.join('\n\n'),
+            segments,
+        };
     }
 
     async function acquireLock(postId) {
