@@ -7,7 +7,7 @@ A WordPress plugin that submits an audio file URL to AssemblyAI for transcriptio
 - Prefills the audio URL by scanning post content and post meta for mp3/wav/ogg links.
 - Creates a "Transcriptions" custom post type for saved transcripts.
 - Appends the transcript to the original post content.
-- Saves AssemblyAI paragraph timings and highlights the active transcript paragraph during audio playback.
+- Saves AssemblyAI paragraph timings and highlights the active transcript paragraph during audio playback, adapting the highlight color to the page text color.
 - Optional background batch mode that auto-transcribes one eligible post per cron run.
 - Speaker labels enabled by default.
 - GitHub-based update checking via the bundled plugin update checker.

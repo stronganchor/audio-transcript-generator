@@ -2,9 +2,11 @@
     border-radius: 2px;
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
-    transition: background-color 0.15s ease;
+    transition: background-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
 }
 
 .whisper-transcript-segment-active {
-    background: rgba(255, 226, 84, 0.55);
+    background: var(--whisper-transcript-highlight-bg, rgba(219, 234, 254, 0.95));
+    box-shadow: var(--whisper-transcript-highlight-shadow, 0 0 0 1px rgba(37, 99, 235, 0.22) inset);
+    color: var(--whisper-transcript-highlight-color, inherit);
 }
