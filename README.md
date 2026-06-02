@@ -33,7 +33,9 @@ Background batch notes:
 - It processes the most recent eligible post that has an audio URL and is not already transcribed.
 - It skips posts detected as likely legacy transcriptions.
 - It starts one new AssemblyAI job, then performs frequent follow-up checks while that job is in progress.
-- Manual kickoffs are disabled while another transcription process is active.
+- Opening the plugin's transcription admin pages checks due in-progress jobs, so a missed WP-Cron follow-up can self-heal while an admin is monitoring it.
+- "Run Batch Now" starts a new batch when idle and checks the current in-progress batch when one already exists.
+- Manual kickoffs and status checks are disabled while another transcription process is actively locked.
 
 Note: The API key is only injected into pages for users with the `manage_options` capability. Non-admin users will not be able to start transcriptions from the UI without code changes.
 
@@ -78,6 +80,7 @@ Optional background mode:
 1. WordPress cron selects the most recent eligible post.
 2. It submits the audio URL to AssemblyAI and stores the transcript ID.
 3. On later cron runs, it checks status, fetches paragraph timings, and saves the transcript when complete.
+4. If a cron follow-up is missed, loading the plugin's admin pages checks due in-progress jobs as a fallback.
 
 ## Data storage
 - Transcripts with paragraph timings are saved as escaped HTML spans with `data-whisper-start` and `data-whisper-end` attributes.

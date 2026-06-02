@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field.
-Version: 2.0.10
+Version: 2.0.11
 Update URI: https://github.com/stronganchor/audio-transcript-generator
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
@@ -981,6 +981,61 @@ function whisper_run_background_batch_followup_tick() {
 }
 add_action(whisper_get_background_batch_followup_hook_name(), 'whisper_run_background_batch_followup_tick');
 
+function whisper_background_batch_admin_check_interval() {
+    $interval = intval(apply_filters('whisper_background_batch_admin_check_interval', 60));
+    return max(10, $interval);
+}
+
+function whisper_background_batch_status_check_is_due($state = null) {
+    if (!is_array($state)) {
+        $state = whisper_get_background_batch_state();
+    }
+
+    if (!whisper_background_batch_is_running($state)) {
+        return false;
+    }
+
+    $last_checked = !empty($state['last_checked']) ? intval($state['last_checked']) : 0;
+    if ($last_checked <= 0) {
+        return true;
+    }
+
+    return (time() - $last_checked) >= whisper_background_batch_admin_check_interval();
+}
+
+function whisper_is_background_batch_admin_screen() {
+    if (!is_admin()) {
+        return false;
+    }
+
+    $page = isset($_GET['page']) ? sanitize_key(wp_unslash($_GET['page'])) : '';
+    return in_array($page, ['whisper-audio-transcription', 'whisper-audio-transcriptions'], true);
+}
+
+function whisper_maybe_check_background_batch_on_admin_page() {
+    if (!whisper_is_background_batch_admin_screen() || wp_doing_ajax() || !current_user_can('manage_options')) {
+        return;
+    }
+
+    $state = whisper_get_background_batch_state();
+    if (!whisper_background_batch_status_check_is_due($state)) {
+        return;
+    }
+
+    if (whisper_get_transcription_lock()) {
+        whisper_schedule_background_batch_followup_tick(120);
+        return;
+    }
+
+    $api_key = whisper_get_assemblyai_api_key();
+    if ($api_key === '') {
+        return;
+    }
+
+    whisper_process_background_batch_state($state, $api_key);
+}
+add_action('admin_init', 'whisper_maybe_check_background_batch_on_admin_page', 20);
+
 function whisper_get_background_batch_run_notice($status, $post_id = 0) {
     $status = sanitize_key((string) $status);
     $post_title = $post_id ? get_the_title($post_id) : '';
@@ -1069,12 +1124,6 @@ function whisper_handle_run_background_batch_now() {
     }
 
     check_admin_referer('whisper_run_background_batch_now');
-
-    $state = whisper_get_background_batch_state();
-    if (whisper_background_batch_is_running($state)) {
-        wp_safe_redirect(whisper_get_background_batch_settings_redirect_url('already_running', intval($state['post_id'])));
-        exit;
-    }
 
     if (whisper_get_transcription_lock()) {
         wp_safe_redirect(whisper_get_background_batch_settings_redirect_url('locked', 0));
@@ -1513,8 +1562,9 @@ function whisper_audio_transcription_settings_page() {
     $batch_details = whisper_get_background_batch_state_details();
     $transcription_lock = whisper_get_transcription_lock();
     $background_batch_running = !empty($batch_details);
-    $manual_kickoff_disabled = $background_batch_running || ($transcription_lock && isset($transcription_lock['post_id']));
+    $manual_kickoff_disabled = $transcription_lock && isset($transcription_lock['post_id']);
     $run_button_attributes = $manual_kickoff_disabled ? ['disabled' => 'disabled'] : [];
+    $run_button_label = $background_batch_running ? 'Check Batch Now' : 'Run Batch Now';
     ?>
     <div class="wrap">
         <h1>Audio Transcription Settings</h1>
@@ -1552,14 +1602,14 @@ function whisper_audio_transcription_settings_page() {
 
         <hr />
         <h2>Background Batch Tools</h2>
-        <p>Run one immediate batch cycle without waiting for the next cron schedule.</p>
+        <p>Run one immediate batch cycle, or check the current background transcription, without waiting for the next cron schedule.</p>
         <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
             <?php wp_nonce_field('whisper_run_background_batch_now'); ?>
             <input type="hidden" name="action" value="whisper_run_background_batch_now" />
-            <?php submit_button('Run Batch Now', 'secondary', 'whisper_run_batch_now', false, $run_button_attributes); ?>
+            <?php submit_button($run_button_label, 'secondary', 'whisper_run_batch_now', false, $run_button_attributes); ?>
         </form>
         <?php if ($manual_kickoff_disabled) : ?>
-            <p class="description">Manual kickoff is disabled while another transcription process is running.</p>
+            <p class="description">Manual kickoff and status checks are disabled while another transcription process is running.</p>
         <?php endif; ?>
         <?php if ($background_batch_running) : ?>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top: 10px;">
