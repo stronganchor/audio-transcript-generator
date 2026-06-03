@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field.
-Version: 2.0.11
+Version: 2.0.12
 Update URI: https://github.com/stronganchor/audio-transcript-generator
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
@@ -1343,6 +1343,8 @@ function whisper_render_admin_transcriptions_page() {
 add_action('wp_ajax_save_transcription', 'save_transcription_callback');
 add_action('wp_ajax_whisper_acquire_transcription_lock', 'whisper_acquire_transcription_lock');
 add_action('wp_ajax_whisper_release_transcription_lock', 'whisper_release_transcription_lock');
+add_action('wp_ajax_whisper_start_assemblyai_transcript', 'whisper_start_assemblyai_transcript_callback');
+add_action('wp_ajax_whisper_get_assemblyai_transcript', 'whisper_get_assemblyai_transcript_callback');
 
 function whisper_acquire_transcription_lock() {
     if (!current_user_can('manage_options')) {
@@ -1403,6 +1405,79 @@ function whisper_release_transcription_lock() {
     wp_send_json_success(['message' => 'Lock released.']);
 }
 
+function whisper_require_assemblyai_ajax_access() {
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'You do not have permission to run transcriptions.'], 403);
+    }
+
+    check_ajax_referer('whisper_assemblyai_transcript', 'nonce');
+
+    $api_key = whisper_get_assemblyai_api_key();
+    if ($api_key === '') {
+        wp_send_json_error(['message' => 'AssemblyAI API key is missing.'], 400);
+    }
+
+    return $api_key;
+}
+
+function whisper_start_assemblyai_transcript_callback() {
+    $api_key = whisper_require_assemblyai_ajax_access();
+
+    $audio_url = isset($_POST['audio_url']) ? esc_url_raw(wp_unslash($_POST['audio_url'])) : '';
+    if ($audio_url === '') {
+        wp_send_json_error(['message' => 'Invalid audio URL.'], 400);
+    }
+
+    $response = whisper_assemblyai_api_request('POST', '/transcript', $api_key, [
+        'audio_url'      => $audio_url,
+        'speaker_labels' => true,
+        'punctuate'      => true,
+        'format_text'    => true,
+    ]);
+
+    if (is_wp_error($response)) {
+        wp_send_json_error(['message' => $response->get_error_message()], 502);
+    }
+
+    if (empty($response['id'])) {
+        wp_send_json_error(['message' => 'AssemblyAI did not return a transcript ID.'], 502);
+    }
+
+    wp_send_json_success([
+        'transcript_id' => sanitize_text_field($response['id']),
+        'status'        => !empty($response['status']) ? sanitize_key($response['status']) : 'submitted',
+    ]);
+}
+
+function whisper_get_assemblyai_transcript_callback() {
+    $api_key = whisper_require_assemblyai_ajax_access();
+
+    $transcript_id = isset($_POST['transcript_id']) ? sanitize_text_field(wp_unslash($_POST['transcript_id'])) : '';
+    if ($transcript_id === '') {
+        wp_send_json_error(['message' => 'Missing transcript ID.'], 400);
+    }
+
+    $response = whisper_assemblyai_api_request('GET', '/transcript/' . rawurlencode($transcript_id), $api_key);
+    if (is_wp_error($response)) {
+        wp_send_json_error(['message' => $response->get_error_message()], 502);
+    }
+
+    $status = !empty($response['status']) ? sanitize_key($response['status']) : 'processing';
+    $payload = [
+        'status' => $status,
+    ];
+
+    if ($status === 'completed') {
+        $transcript_result = whisper_get_completed_transcription_result($transcript_id, $api_key, !empty($response['text']) ? (string) $response['text'] : '');
+        $payload['text'] = $transcript_result['text'];
+        $payload['segments'] = $transcript_result['segments'];
+    } elseif ($status === 'failed') {
+        $payload['error'] = !empty($response['error']) ? sanitize_text_field($response['error']) : 'AssemblyAI marked the transcript as failed.';
+    }
+
+    wp_send_json_success($payload);
+}
+
 function save_transcription_callback() {
     try {
         if (!current_user_can('manage_options')) {
@@ -1448,13 +1523,12 @@ function enqueue_transcription_script() {
         $asset_version,
         true
     );
-    $assemblyai_api = current_user_can('manage_options') ? whisper_get_assemblyai_api_key() : '';
     wp_localize_script('assemblyai-transcription', 'assemblyai_settings', [
-        'ajax_url'           => admin_url('admin-ajax.php'),
-        'assemblyai_api_key' => $assemblyai_api,
-        'post_id'            => get_the_ID(),
-        'lock_nonce'         => current_user_can('manage_options') ? wp_create_nonce('whisper_transcription_lock') : '',
-        'save_nonce'         => current_user_can('manage_options') ? wp_create_nonce('whisper_save_transcription') : '',
+        'ajax_url'   => admin_url('admin-ajax.php'),
+        'post_id'    => get_the_ID(),
+        'api_nonce'  => current_user_can('manage_options') ? wp_create_nonce('whisper_assemblyai_transcript') : '',
+        'lock_nonce' => current_user_can('manage_options') ? wp_create_nonce('whisper_transcription_lock') : '',
+        'save_nonce' => current_user_can('manage_options') ? wp_create_nonce('whisper_save_transcription') : '',
     ]);
 }
 add_action('wp_enqueue_scripts', 'enqueue_transcription_script');
@@ -1512,11 +1586,11 @@ function whisper_enqueue_admin_transcriptions_assets($hook) {
 
     $lock = whisper_get_transcription_lock();
     wp_localize_script('assemblyai-admin', 'assemblyai_admin', [
-        'ajax_url'           => admin_url('admin-ajax.php'),
-        'assemblyai_api_key' => current_user_can('manage_options') ? whisper_get_assemblyai_api_key() : '',
-        'lock_nonce'         => wp_create_nonce('whisper_transcription_lock'),
-        'save_nonce'         => wp_create_nonce('whisper_save_transcription'),
-        'current_lock'       => $lock,
+        'ajax_url'     => admin_url('admin-ajax.php'),
+        'api_nonce'    => wp_create_nonce('whisper_assemblyai_transcript'),
+        'lock_nonce'   => wp_create_nonce('whisper_transcription_lock'),
+        'save_nonce'   => wp_create_nonce('whisper_save_transcription'),
+        'current_lock' => $lock,
     ]);
 }
 add_action('admin_enqueue_scripts', 'whisper_enqueue_admin_transcriptions_assets');

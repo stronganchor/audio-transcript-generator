@@ -1,16 +1,17 @@
-document.addEventListener('DOMContentLoaded', function() { 
+document.addEventListener('DOMContentLoaded', function() {
     const transcriptionButton = document.querySelector('#transcribeButton');
     const statusDiv = document.querySelector('#transcriptionStatus');
     const transcriptionContainer = document.querySelector('#transcriptionResult');
-    
+
     if (transcriptionButton) {
         transcriptionButton.addEventListener('click', async function() {
             statusDiv.style.display = 'block';
-            statusDiv.innerHTML = 'Starting transcription...';
-            transcriptionContainer.innerHTML = '';
+            setStatus('Starting transcription...');
+            if (transcriptionContainer) {
+                transcriptionContainer.textContent = '';
+            }
 
             const audioUrl = document.querySelector('#audio_url').value;
-            const assemblyApiKey = assemblyai_settings.assemblyai_api_key;
             const postId = assemblyai_settings.post_id;
 
             if (!audioUrl) {
@@ -28,46 +29,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!lockAcquired) {
                     transcriptionButton.disabled = false;
                     document.querySelector('#audio_url').disabled = false;
-                    statusDiv.innerHTML = 'Another transcription is already running.';
+                    setStatus('Another transcription is already running.');
                     return;
                 }
 
-                const params = {
-                    audio_url: audioUrl,
-                    speaker_labels: true,
-                    punctuate: true,
-                    format_text: true,
-                };
-
-                const response = await fetch('https://api.assemblyai.com/v2/transcript', {
-                    method: 'POST',
-                    headers: {
-                        'authorization': assemblyApiKey,
-                        'content-type': 'application/json',
-                    },
-                    body: JSON.stringify(params),
-                });
-
-                const data = await response.json();
-
-                if (data.error) {
-                    transcriptionButton.disabled = false;
-                    document.querySelector('#audio_url').disabled = false;
-                    statusDiv.innerHTML = `Transcription request failed: ${data.error}`;
-                    return;
-                }
-
-                console.log('Transcription initiated, polling for completion:', data);
-                statusDiv.innerHTML = `Transcription process initiated. This may take a few minutes. Please keep this window open.`;
-
-                const transcriptId = data.id;
-                await pollTranscriptionStatus(assemblyApiKey, transcriptId, audioUrl, postId);
-
+                const transcriptId = await createTranscript(audioUrl);
+                setStatus('Transcription process initiated. This may take a few minutes. Please keep this window open.');
+                await pollTranscriptionStatus(transcriptId, audioUrl, postId);
             } catch (error) {
                 console.error('Error during transcription request:', error);
                 transcriptionButton.disabled = false;
                 document.querySelector('#audio_url').disabled = false;
-                statusDiv.innerHTML = `An error occurred during transcription: ${error}`;
+                setStatus(`An error occurred during transcription: ${errorMessage(error)}`);
             } finally {
                 if (lockAcquired) {
                     await releaseLock();
@@ -76,56 +49,83 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    async function pollTranscriptionStatus(apiKey, transcriptId, audioUrl, postId) {
+    async function createTranscript(audioUrl) {
+        const response = await fetch(assemblyai_settings.ajax_url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                action: 'whisper_start_assemblyai_transcript',
+                audio_url: audioUrl,
+                nonce: assemblyai_settings.api_nonce || '',
+            }),
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(wpErrorMessage(result, 'Transcription request failed.'));
+        }
+        if (!result.data || !result.data.transcript_id) {
+            throw new Error('No transcript ID returned.');
+        }
+
+        return result.data.transcript_id;
+    }
+
+    async function pollTranscriptionStatus(transcriptId, audioUrl, postId) {
         let transcriptionCompleted = false;
-    
+
         while (!transcriptionCompleted) {
             try {
-                const pollResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
-                    method: 'GET',
-                    headers: {
-                        'authorization': apiKey,
-                        'content-type': 'application/json',
-                    },
-                });
-                
-                const pollData = await pollResponse.json();
+                const result = await fetchTranscriptStatus(transcriptId);
+                const pollData = result.data || {};
 
                 if (pollData.status === 'completed') {
                     transcriptionCompleted = true;
-                    statusDiv.innerHTML += `<br>Transcription completed. Formatting paragraphs...`;
-                    console.log('Transcription completed:', pollData.text);
-                    let transcriptData = {
-                        text: pollData.text || '',
-                        segments: [],
-                    };
-                    try {
-                        transcriptData = await fetchParagraphs(apiKey, transcriptId);
-                    } catch (error) {
-                        console.error('Error fetching formatted paragraphs:', error);
-                        statusDiv.innerHTML += `<br>Could not format paragraphs; saving raw transcript.`;
-                    }
-                    const textToSave = transcriptData.text || pollData.text || '';
-                    await saveTranscription(textToSave, audioUrl, postId, transcriptData.segments || []);
+                    appendStatus('Transcription completed. Formatting paragraphs...');
+                    const textToSave = pollData.text || '';
+                    await saveTranscription(textToSave, audioUrl, postId, pollData.segments || []);
                 } else if (pollData.status === 'failed') {
-                    console.error(`Transcription failed: ${pollData.error}`);
-                    statusDiv.innerHTML = `Transcription failed: ${pollData.error}`;
+                    console.error(`Transcription failed: ${pollData.error || 'Unknown error'}`);
+                    setStatus(`Transcription failed: ${pollData.error || 'Unknown error'}`);
                     transcriptionCompleted = true;
                     transcriptionButton.disabled = false;
                     document.querySelector('#audio_url').disabled = false;
                 } else {
                     console.log(`Transcription status: ${pollData.status}. Checking again in 5 seconds...`);
-                    statusDiv.innerHTML = `${statusDiv.innerHTML}<br>Status: ${pollData.status}. Checking again...`;
+                    appendStatus(`Status: ${pollData.status || 'processing'}. Checking again...`);
                     await new Promise(resolve => setTimeout(resolve, 5000));
                 }
             } catch (error) {
                 console.error('Error while polling transcription status:', error);
-                statusDiv.innerHTML = `Error while polling transcription status: ${error}`;
+                setStatus(`Error while polling transcription status: ${errorMessage(error)}`);
                 transcriptionCompleted = true;
                 transcriptionButton.disabled = false;
                 document.querySelector('#audio_url').disabled = false;
             }
         }
+    }
+
+    async function fetchTranscriptStatus(transcriptId) {
+        const response = await fetch(assemblyai_settings.ajax_url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                action: 'whisper_get_assemblyai_transcript',
+                transcript_id: transcriptId,
+                nonce: assemblyai_settings.api_nonce || '',
+            }),
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(wpErrorMessage(result, 'Unable to check transcription status.'));
+        }
+
+        return result;
     }
 
     async function saveTranscription(transcriptionText, audioUrl, postId, transcriptSegments) {
@@ -144,67 +144,26 @@ document.addEventListener('DOMContentLoaded', function() {
                     nonce: assemblyai_settings.save_nonce || ''
                 }),
             });
-        
+
             const result = await response.json();
             if (result.success) {
                 console.log('Transcription saved and appended to post:', result);
-                statusDiv.innerHTML += `<br>Transcription saved successfully! Refreshing the page...`;
+                appendStatus('Transcription saved successfully! Refreshing the page...');
                 setTimeout(() => {
                     location.reload();
                 }, 3000);
             } else {
                 console.error('Failed to save transcription:', result);
-                statusDiv.innerHTML += `<br>Failed to save transcription: ${result.data || 'Unknown error'}`;
+                appendStatus(`Failed to save transcription: ${wpErrorMessage(result, 'Unknown error')}`);
                 transcriptionButton.disabled = false;
                 document.querySelector('#audio_url').disabled = false;
             }
         } catch (error) {
             console.error('Error while saving transcription to WordPress:', error);
-            statusDiv.innerHTML += `<br>Error while saving transcription: ${error}`;
+            appendStatus(`Error while saving transcription: ${errorMessage(error)}`);
             transcriptionButton.disabled = false;
             document.querySelector('#audio_url').disabled = false;
-        }  
-    }
-
-    async function fetchParagraphs(apiKey, transcriptId) {
-        const response = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}/paragraphs`, {
-            method: 'GET',
-            headers: {
-                'authorization': apiKey,
-                'content-type': 'application/json',
-            },
-        });
-        const data = await response.json();
-        if (data.error) {
-            throw new Error(data.error);
         }
-        if (!data.paragraphs || !Array.isArray(data.paragraphs)) {
-            return {
-                text: '',
-                segments: [],
-            };
-        }
-        const paragraphs = data.paragraphs
-            .map(p => (p && p.text ? p.text.trim() : ''))
-            .filter(Boolean);
-        if (!paragraphs.length) {
-            return {
-                text: '',
-                segments: [],
-            };
-        }
-        const segments = data.paragraphs
-            .map(p => ({
-                text: p && p.text ? p.text.trim() : '',
-                start: p && Number.isFinite(Number(p.start)) ? Number(p.start) : null,
-                end: p && Number.isFinite(Number(p.end)) ? Number(p.end) : null,
-            }))
-            .filter(segment => segment.text && segment.start !== null && segment.end !== null && segment.end > segment.start);
-
-        return {
-            text: paragraphs.join('\n\n'),
-            segments,
-        };
     }
 
     async function acquireLock(postId) {
@@ -245,5 +204,33 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('Failed to release transcription lock:', error);
         }
+    }
+
+    function setStatus(message) {
+        if (statusDiv) {
+            statusDiv.textContent = message;
+        }
+    }
+
+    function appendStatus(message) {
+        if (!statusDiv) {
+            return;
+        }
+        statusDiv.appendChild(document.createElement('br'));
+        statusDiv.appendChild(document.createTextNode(message));
+    }
+
+    function errorMessage(error) {
+        return error && error.message ? error.message : String(error || 'Unknown error');
+    }
+
+    function wpErrorMessage(result, fallback) {
+        if (result && result.data && result.data.message) {
+            return result.data.message;
+        }
+        if (result && typeof result.data === 'string') {
+            return result.data;
+        }
+        return fallback;
     }
 });

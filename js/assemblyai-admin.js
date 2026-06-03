@@ -116,11 +116,6 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        if (!assemblyai_admin.assemblyai_api_key) {
-            setRowStatus(row, 'Missing AssemblyAI API key.');
-            return;
-        }
-
         active = true;
         setButtonsEnabled(false);
         setRowActive(row, true);
@@ -196,28 +191,26 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function createTranscript(audioUrl) {
-        const response = await fetch('https://api.assemblyai.com/v2/transcript', {
+        const response = await fetch(assemblyai_admin.ajax_url, {
             method: 'POST',
             headers: {
-                'authorization': assemblyai_admin.assemblyai_api_key,
-                'content-type': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: JSON.stringify({
+            body: new URLSearchParams({
+                action: 'whisper_start_assemblyai_transcript',
                 audio_url: audioUrl,
-                speaker_labels: true,
-                punctuate: true,
-                format_text: true,
+                nonce: assemblyai_admin.api_nonce || '',
             }),
         });
 
-        const data = await response.json();
-        if (data.error) {
-            throw new Error(data.error);
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(wpErrorMessage(result, 'Transcription request failed.'));
         }
-        if (!data.id) {
+        if (!result.data || !result.data.transcript_id) {
             throw new Error('No transcript ID returned.');
         }
-        return data.id;
+        return result.data.transcript_id;
     }
 
     async function pollTranscript(transcriptId, audioUrl, postId, row, button) {
@@ -225,25 +218,13 @@ document.addEventListener('DOMContentLoaded', function() {
         let progress = 25;
 
         while (!completed) {
-            const pollResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
-                method: 'GET',
-                headers: {
-                    'authorization': assemblyai_admin.assemblyai_api_key,
-                    'content-type': 'application/json',
-                },
-            });
-
-            const pollData = await pollResponse.json();
-            if (pollData.error) {
-                throw new Error(pollData.error);
-            }
+            const pollData = await fetchTranscriptStatus(transcriptId);
 
             if (pollData.status === 'completed') {
                 completed = true;
                 setRowStatus(row, 'Formatting transcript...');
                 setRowProgress(row, 90);
-                const transcriptData = await fetchParagraphs(transcriptId);
-                await saveTranscription(transcriptData.text || pollData.text || '', transcriptData.segments || [], audioUrl, postId, row, button);
+                await saveTranscription(pollData.text || '', pollData.segments || [], audioUrl, postId, row, button);
                 setRowProgress(row, 100);
                 setGlobalStatus('Transcription completed.');
             } else if (pollData.status === 'failed') {
@@ -260,54 +241,29 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    async function fetchTranscriptStatus(transcriptId) {
+        const response = await fetch(assemblyai_admin.ajax_url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                action: 'whisper_get_assemblyai_transcript',
+                transcript_id: transcriptId,
+                nonce: assemblyai_admin.api_nonce || '',
+            }),
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(wpErrorMessage(result, 'Transcription status check failed.'));
+        }
+        return result.data || {};
+    }
+
     function bumpProgress(current, status) {
         const cap = status === 'queued' ? 40 : 90;
         return Math.min(cap, current + 5);
-    }
-
-    async function fetchParagraphs(transcriptId) {
-        const response = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}/paragraphs`, {
-            method: 'GET',
-            headers: {
-                'authorization': assemblyai_admin.assemblyai_api_key,
-                'content-type': 'application/json',
-            },
-        });
-
-        const data = await response.json();
-        if (data.error) {
-            return {
-                text: '',
-                segments: [],
-            };
-        }
-        if (!data.paragraphs || !Array.isArray(data.paragraphs)) {
-            return {
-                text: '',
-                segments: [],
-            };
-        }
-        const paragraphs = data.paragraphs
-            .map(p => (p && p.text ? p.text.trim() : ''))
-            .filter(Boolean);
-        if (!paragraphs.length) {
-            return {
-                text: '',
-                segments: [],
-            };
-        }
-        const segments = data.paragraphs
-            .map(p => ({
-                text: p && p.text ? p.text.trim() : '',
-                start: p && Number.isFinite(Number(p.start)) ? Number(p.start) : null,
-                end: p && Number.isFinite(Number(p.end)) ? Number(p.end) : null,
-            }))
-            .filter(segment => segment.text && segment.start !== null && segment.end !== null && segment.end > segment.start);
-
-        return {
-            text: paragraphs.join('\n\n'),
-            segments,
-        };
     }
 
     async function saveTranscription(transcriptionText, transcriptSegments, audioUrl, postId, row, button) {
@@ -337,6 +293,16 @@ document.addEventListener('DOMContentLoaded', function() {
         if (button) {
             button.textContent = 'Re-transcribe';
         }
+    }
+
+    function wpErrorMessage(result, fallback) {
+        if (result && result.data && result.data.message) {
+            return result.data.message;
+        }
+        if (result && typeof result.data === 'string') {
+            return result.data;
+        }
+        return fallback;
     }
 
     function sleep(ms) {

@@ -1,6 +1,6 @@
 # AI Audio Transcription Interface
 
-A WordPress plugin that submits an audio file URL to AssemblyAI for transcription, polls for completion in the browser, then saves the transcript into WordPress.
+A WordPress plugin that submits an audio file URL to AssemblyAI through WordPress, polls for completion through authenticated AJAX, then saves the transcript into WordPress.
 
 ## Features
 - URL-based transcription from the post editor or a shortcode.
@@ -37,7 +37,7 @@ Background batch notes:
 - "Run Batch Now" starts a new batch when idle and checks the current in-progress batch when one already exists.
 - Manual kickoffs and status checks are disabled while another transcription process is actively locked.
 
-Note: The API key is only injected into pages for users with the `manage_options` capability. Non-admin users will not be able to start transcriptions from the UI without code changes.
+Note: Transcription requests require the `manage_options` capability. The AssemblyAI API key stays on the WordPress server and is not injected into browser JavaScript.
 
 ## Usage
 
@@ -63,18 +63,18 @@ Add the shortcode below to a post or page:
 [whisper_audio_transcription]
 ```
 
-This renders the same URL input and "Transcribe" button on the front end. The API key is only available to users with `manage_options`.
+This renders the same URL input and "Transcribe" button on the front end. Starting a transcription still requires a logged-in user with `manage_options`.
 
 ## How it works (data flow)
-1. The browser submits the audio URL to AssemblyAI:
-   - `POST https://api.assemblyai.com/v2/transcript`
-2. The browser polls the transcript status every 5 seconds:
-   - `GET https://api.assemblyai.com/v2/transcript/{id}`
-3. When complete, the browser fetches paragraph formatting and timings:
-   - `GET https://api.assemblyai.com/v2/transcript/{id}/paragraphs`
-4. The browser sends the transcript and paragraph timing data to WordPress:
+1. The browser sends the audio URL to an authenticated WordPress AJAX endpoint:
+   - `POST admin-ajax.php?action=whisper_start_assemblyai_transcript`
+2. WordPress submits the request to AssemblyAI and returns a transcript ID.
+3. The browser polls an authenticated WordPress AJAX endpoint every 5 seconds:
+   - `POST admin-ajax.php?action=whisper_get_assemblyai_transcript`
+4. When complete, WordPress fetches paragraph formatting and timings from AssemblyAI.
+5. The browser sends the transcript and paragraph timing data to WordPress:
    - `POST admin-ajax.php?action=save_transcription`
-5. WordPress creates a new `transcription` post and appends the text to the original post content.
+6. WordPress creates a new `transcription` post and appends the text to the original post content.
 
 Optional background mode:
 1. WordPress cron selects the most recent eligible post.
@@ -91,20 +91,20 @@ Optional background mode:
 - Background mode state is tracked in `whisper_background_batch_state`.
 
 ## APIs and services used
-- AssemblyAI Transcript API (client-side requests from the browser).
-- WordPress AJAX (`admin-ajax.php`) for saving transcripts.
+- AssemblyAI Transcript API (server-side requests from WordPress).
+- WordPress AJAX (`admin-ajax.php`) for starting, polling, and saving transcripts.
 - GitHub update checks via the bundled plugin update checker.
 
 ## Security considerations
-- The AssemblyAI API key is exposed to the browser for admin users. Only use this in trusted admin contexts.
-- The `save_transcription` AJAX endpoint requires the `manage_options` capability and a WordPress nonce.
+- The AssemblyAI API key is stored in WordPress options and used only server-side.
+- The transcription and save AJAX endpoints require the `manage_options` capability and WordPress nonces.
 
 ## Customization
 - Change supported post types in `whisper_add_transcription_meta_box` in `audio-transcript-generator.php`.
 - Change polling interval in `js/assemblyai-transcription.js` (currently 5 seconds).
-- Disable speaker labels by removing `speaker_labels: true` in `js/assemblyai-transcription.js`.
+- Disable speaker labels by changing the `speaker_labels` request option in `audio-transcript-generator.php`.
 
 ## Troubleshooting
 - "Transcription request failed": check your AssemblyAI API key and account status.
 - No transcript appears: confirm your audio URL is reachable and ends with `.mp3`, `.wav`, or `.ogg`.
-- Shortcode works only for admins by default: the API key is not injected for non-admin users.
+- Shortcode works only for admins by default: the transcription AJAX endpoints require `manage_options`.
