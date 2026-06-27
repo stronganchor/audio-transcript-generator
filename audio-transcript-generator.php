@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field.
-Version: 2.0.12
+Version: 2.0.13
 Update URI: https://github.com/stronganchor/audio-transcript-generator
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
@@ -475,6 +475,66 @@ function whisper_get_transcribable_posts() {
     }
 
     return $items;
+}
+
+function whisper_classify_admin_transcription_list_item($item) {
+    if (!empty($item['post_type']) && $item['post_type'] === 'transcription') {
+        return 'generated_transcription';
+    }
+
+    if (!empty($item['transcribed_at']) || !empty($item['transcription_post_id'])) {
+        return 'already_transcribed';
+    }
+
+    if (!empty($item['legacy_possible'])) {
+        return 'legacy_possible';
+    }
+
+    return 'pending';
+}
+
+function whisper_get_admin_transcription_list_state($items, $show_all = false) {
+    $state = [
+        'items'         => [],
+        'total_count'   => count($items),
+        'hidden_counts' => [
+            'generated_transcription' => 0,
+            'already_transcribed'     => 0,
+            'legacy_possible'         => 0,
+        ],
+    ];
+
+    foreach ($items as $item) {
+        $classification = whisper_classify_admin_transcription_list_item($item);
+        if ($classification === 'pending' || $show_all) {
+            $state['items'][] = $item;
+            continue;
+        }
+
+        if (isset($state['hidden_counts'][$classification])) {
+            $state['hidden_counts'][$classification]++;
+        }
+    }
+
+    return $state;
+}
+
+function whisper_format_admin_transcription_hidden_summary($hidden_counts) {
+    $labels = [
+        'already_transcribed'     => 'already transcribed',
+        'generated_transcription' => 'generated transcription posts',
+        'legacy_possible'         => 'likely legacy transcriptions',
+    ];
+    $parts = [];
+
+    foreach ($labels as $key => $label) {
+        $count = isset($hidden_counts[$key]) ? intval($hidden_counts[$key]) : 0;
+        if ($count > 0) {
+            $parts[] = sprintf('%s %s', number_format_i18n($count), $label);
+        }
+    }
+
+    return implode(', ', $parts);
 }
 
 function whisper_get_background_batch_candidate() {
@@ -1196,7 +1256,13 @@ function whisper_render_admin_transcriptions_page() {
         wp_die(esc_html__('You do not have permission to access this page.', 'whisper'));
     }
 
-    $items = whisper_get_transcribable_posts();
+    $all_items = whisper_get_transcribable_posts();
+    $show_all_transcription_rows = isset($_GET['show_all_transcription_rows']) && sanitize_text_field(wp_unslash($_GET['show_all_transcription_rows'])) === '1';
+    $list_state = whisper_get_admin_transcription_list_state($all_items, $show_all_transcription_rows);
+    $items = $list_state['items'];
+    $hidden_counts = $list_state['hidden_counts'];
+    $hidden_total = array_sum($hidden_counts);
+    $hidden_summary = whisper_format_admin_transcription_hidden_summary($hidden_counts);
     $lock = whisper_get_transcription_lock();
     $batch_state = whisper_get_background_batch_state();
     $batch_details = whisper_get_background_batch_state_details($batch_state);
@@ -1254,6 +1320,22 @@ function whisper_render_admin_transcriptions_page() {
                 </form>
             </div>
         <?php endif; ?>
+        <?php if ($show_all_transcription_rows) : ?>
+            <div class="notice notice-info">
+                <p>
+                    Showing all audio rows, including already transcribed and likely legacy rows.
+                    <a href="<?php echo esc_url(remove_query_arg('show_all_transcription_rows')); ?>">Show only posts needing transcription.</a>
+                </p>
+            </div>
+        <?php elseif ($hidden_total > 0) : ?>
+            <div class="notice notice-info">
+                <p>
+                    Showing only posts that still need transcription.
+                    Hidden: <?php echo esc_html($hidden_summary); ?>.
+                    <a href="<?php echo esc_url(add_query_arg('show_all_transcription_rows', '1')); ?>">Show all audio rows.</a>
+                </p>
+            </div>
+        <?php endif; ?>
         <table class="widefat fixed striped">
             <thead>
                 <tr>
@@ -1267,7 +1349,9 @@ function whisper_render_admin_transcriptions_page() {
             <tbody>
                 <?php if (empty($items)) : ?>
                     <tr>
-                        <td colspan="5">No audio URLs were found in supported post types.</td>
+                        <td colspan="5">
+                            <?php echo $show_all_transcription_rows ? 'No audio URLs were found in supported post types.' : 'No eligible audio posts currently need transcription.'; ?>
+                        </td>
                     </tr>
                 <?php else : ?>
                     <?php foreach ($items as $item) : ?>
