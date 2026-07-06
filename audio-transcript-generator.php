@@ -3,7 +3,7 @@
 Plugin Name: AI Audio Transcription Interface
 Plugin URI: https://stronganchortech.com
 Description: A plugin to handle audio transcription using the AssemblyAI API via a URL input field.
-Version: 2.0.13
+Version: 2.0.14
 Update URI: https://github.com/stronganchor/audio-transcript-generator
 Author: Strong Anchor Tech
 Author URI: https://stronganchortech.com
@@ -1781,7 +1781,7 @@ function whisper_audio_transcription_settings_page() {
 }
 
 function whisper_audio_transcription_settings_init() {
-    register_setting('whisper_audio_transcription_options_group', 'assemblyai_api_key');
+    register_setting('whisper_audio_transcription_options_group', 'assemblyai_api_key', 'sanitize_text_field');
     register_setting('whisper_audio_transcription_options_group', 'whisper_background_batch_enabled', 'whisper_sanitize_background_batch_enabled');
     register_setting('whisper_audio_transcription_options_group', 'whisper_background_batch_frequency', 'whisper_sanitize_background_batch_frequency');
 
